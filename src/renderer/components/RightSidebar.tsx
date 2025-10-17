@@ -2,6 +2,7 @@ import React from 'react';
 import { cn } from '@/lib/utils';
 import FileChangesPanel from './FileChangesPanel';
 import WorkspaceTerminalPanel from './WorkspaceTerminalPanel';
+import PreviewPanel from './PreviewPanel';
 import { useRightSidebar } from './ui/right-sidebar';
 
 export interface RightSidebarWorkspace {
@@ -19,6 +20,8 @@ interface RightSidebarProps extends React.HTMLAttributes<HTMLElement> {
 
 const RightSidebar: React.FC<RightSidebarProps> = ({ workspace, className, ...rest }) => {
   const { collapsed } = useRightSidebar();
+
+  const [mode, setMode] = React.useState<'terminal' | 'preview'>('terminal');
 
   return (
     <aside
@@ -38,7 +41,37 @@ const RightSidebar: React.FC<RightSidebarProps> = ({ workspace, className, ...re
               workspaceId={workspace.path}
               className="min-h-0 flex-1 border-b border-border"
             />
-            <WorkspaceTerminalPanel workspace={workspace} className="min-h-0 flex-1" />
+            <div className="flex min-h-0 flex-1 flex-col">
+              <div className="flex items-center gap-1 border-b border-border bg-gray-50 px-2 py-1 text-xs dark:bg-gray-900">
+                <button
+                  className={`rounded px-2 py-1 ${
+                    mode === 'terminal'
+                      ? 'bg-black text-white dark:bg-white dark:text-black'
+                      : 'border border-border bg-background hover:bg-muted'
+                  }`}
+                  onClick={() => setMode('terminal')}
+                >
+                  Terminal
+                </button>
+                <button
+                  className={`rounded px-2 py-1 ${
+                    mode === 'preview'
+                      ? 'bg-black text-white dark:bg-white dark:text-black'
+                      : 'border border-border bg-background hover:bg-muted'
+                  }`}
+                  onClick={() => setMode('preview')}
+                >
+                  Preview
+                </button>
+              </div>
+              <div className="min-h-0 flex-1">
+                {mode === 'terminal' ? (
+                  <WorkspaceTerminalPanel workspace={workspace} className="min-h-0 flex-1" />
+                ) : (
+                  <PreviewPanel workspace={workspace} className="min-h-0 flex-1" />
+                )}
+              </div>
+            </div>
           </div>
         ) : (
           <div className="flex h-full flex-col text-sm text-muted-foreground">
@@ -54,11 +87,11 @@ const RightSidebar: React.FC<RightSidebarProps> = ({ workspace, className, ...re
             </div>
             <div className="flex flex-1 flex-col border-t border-border bg-background">
               <div className="border-b border-border bg-gray-50 px-3 py-2 text-sm font-medium text-foreground dark:bg-gray-900">
-                <span className="whitespace-nowrap">Terminal</span>
+                <span className="whitespace-nowrap">Terminal / Preview</span>
               </div>
               <div className="flex flex-1 items-center justify-center px-4 text-center">
                 <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-                  Select a workspace to open its terminal.
+                  Select a workspace to open terminal or preview.
                 </span>
               </div>
             </div>
