@@ -1,5 +1,6 @@
 import React from 'react';
 import { Trash } from 'lucide-react';
+import { Spinner } from './ui/spinner';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,6 +18,7 @@ type Props = {
   onConfirm: () => void | Promise<void>;
   className?: string;
   'aria-label'?: string;
+  isDeleting?: boolean;
 };
 
 export const WorkspaceDeleteButton: React.FC<Props> = ({
@@ -24,6 +26,7 @@ export const WorkspaceDeleteButton: React.FC<Props> = ({
   onConfirm,
   className,
   'aria-label': ariaLabel = 'Delete workspace',
+  isDeleting = false,
 }) => {
   return (
     <AlertDialog>
@@ -36,9 +39,15 @@ export const WorkspaceDeleteButton: React.FC<Props> = ({
           }
           title="Delete workspace"
           aria-label={ariaLabel}
+          aria-busy={isDeleting}
+          disabled={isDeleting}
           onClick={(e) => e.stopPropagation()}
         >
-          <Trash className="h-3.5 w-3.5" />
+          {isDeleting ? (
+            <Spinner className="h-3.5 w-3.5" size="sm" />
+          ) : (
+            <Trash className="h-3.5 w-3.5" />
+          )}
         </button>
       </AlertDialogTrigger>
       <AlertDialogContent onClick={(e) => e.stopPropagation()} className="space-y-4">
@@ -52,9 +61,11 @@ export const WorkspaceDeleteButton: React.FC<Props> = ({
           <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction
             className="bg-destructive px-4 py-2 text-destructive-foreground hover:bg-destructive/90"
-            onClick={(e) => {
+            onClick={async (e) => {
               e.stopPropagation();
-              Promise.resolve(onConfirm()).catch(() => {});
+              try {
+                await onConfirm();
+              } catch {}
             }}
           >
             Delete

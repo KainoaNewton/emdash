@@ -63,10 +63,25 @@ function ensureInitialized() {
   autoUpdater.on('update-downloaded', (info) => emit(UpdateChannels.downloaded, info));
 }
 
-// Fallback: open latest DMG link in browser for manual install
+// Fallback: open latest download link in browser for manual install
 function getLatestDownloadUrl(): string {
+  const platform = process.platform;
   const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
-  return `https://github.com/generalaction/emdash/releases/latest/download/emdash-${arch}.dmg`;
+  const baseUrl = 'https://github.com/generalaction/emdash/releases/latest/download';
+
+  switch (platform) {
+    case 'darwin':
+      return `${baseUrl}/emdash-${arch}.dmg`;
+    case 'linux':
+      // For Linux, prefer AppImage (more universal)
+      return `${baseUrl}/emdash-x86_64.AppImage`;
+    case 'win32':
+      // For Windows, prefer portable exe
+      return `${baseUrl}/emdash-x64.exe`;
+    default:
+      // Fallback to releases page
+      return 'https://github.com/generalaction/emdash/releases/latest';
+  }
 }
 
 export function registerUpdateIpc() {

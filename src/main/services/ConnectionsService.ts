@@ -63,6 +63,13 @@ const CLI_DEFINITIONS: CliDefinition[] = [
     docUrl: 'https://github.com/google-gemini/gemini-cli',
   },
   {
+    id: 'qwen',
+    name: 'Qwen Code',
+    commands: ['qwen'],
+    args: ['--version'],
+    docUrl: 'https://github.com/QwenLM/qwen-code',
+  },
+  {
     id: 'droid',
     name: 'Droid',
     commands: ['droid'],

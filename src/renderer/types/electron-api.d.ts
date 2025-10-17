@@ -244,6 +244,27 @@ declare global {
       }>;
       githubGetUser: () => Promise<any>;
       githubGetRepositories: () => Promise<any[]>;
+      githubCloneRepository: (
+        repoUrl: string,
+        localPath: string
+      ) => Promise<{ success: boolean; error?: string }>;
+      githubListPullRequests: (
+        projectPath: string
+      ) => Promise<{ success: boolean; prs?: any[]; error?: string }>;
+      githubCreatePullRequestWorktree: (args: {
+        projectPath: string;
+        projectId: string;
+        prNumber: number;
+        prTitle?: string;
+        workspaceName?: string;
+        branchName?: string;
+      }) => Promise<{
+        success: boolean;
+        worktree?: any;
+        branchName?: string;
+        workspaceName?: string;
+        error?: string;
+      }>;
       githubLogout: () => Promise<void>;
       // Linear integration
       linearCheckConnection?: () => Promise<{
@@ -557,6 +578,32 @@ export interface ElectronAPI {
   githubIsAuthenticated: () => Promise<boolean>;
   githubGetUser: () => Promise<any>;
   githubGetRepositories: () => Promise<any[]>;
+  githubCloneRepository: (
+    repoUrl: string,
+    localPath: string
+  ) => Promise<{ success: boolean; error?: string }>;
+  githubGetStatus?: () => Promise<{
+    installed: boolean;
+    authenticated: boolean;
+    user?: any;
+  }>;
+  githubListPullRequests: (
+    projectPath: string
+  ) => Promise<{ success: boolean; prs?: any[]; error?: string }>;
+  githubCreatePullRequestWorktree: (args: {
+    projectPath: string;
+    projectId: string;
+    prNumber: number;
+    prTitle?: string;
+    workspaceName?: string;
+    branchName?: string;
+  }) => Promise<{
+    success: boolean;
+    worktree?: any;
+    branchName?: string;
+    workspaceName?: string;
+    error?: string;
+  }>;
   githubLogout: () => Promise<void>;
 
   // Linear integration

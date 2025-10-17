@@ -1,4 +1,4 @@
-name: Release macOS DMG
+name: Release
 
 on:
   push:
@@ -101,6 +101,85 @@ jobs:
 
       # Optional: upload build artifacts for debugging even if publish fails
       # Deliberately skip uploading debug DMGs to avoid confusion
+
+  release-linux:
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    environment: release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Python 3.11 for node-gyp
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python build deps (setuptools)
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          echo "python=$(which python3)" >> $GITHUB_ENV
+
+      - name: Install system build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential
+
+      - name: Install dependencies
+        env:
+          npm_config_python: ${{ env.python }}
+        run: npm ci || npm install
+
+      - name: Build app (ts + vite)
+        run: npm run build
+
+      - name: Inject PostHog config
+        env:
+          PH_KEY: ${{ secrets.POSTHOG_PROJECT_API_KEY }}
+          PH_HOST: ${{ secrets.POSTHOG_HOST }}
+        run: |
+          set -euo pipefail
+          if [ -z "${PH_KEY:-}" ] || [ -z "${PH_HOST:-}" ]; then
+            echo "PostHog secrets not set; skipping telemetry injection (app will have telemetry disabled)."
+            exit 0
+          fi
+          mkdir -p dist/main
+          cat > dist/main/appConfig.json <<'JSON'
+          {
+            "posthogHost": "__PH_HOST__",
+            "posthogKey": "__PH_KEY__"
+          }
+          JSON
+          sed -i "s#__PH_HOST__#${PH_HOST}#g" dist/main/appConfig.json
+          sed -i "s#__PH_KEY__#${PH_KEY}#g" dist/main/appConfig.json
+          echo "Wrote dist/main/appConfig.json"
+
+      - name: Build Linux packages (AppImage and .deb)
+        run: npm run package:linux
+
+      - name: Upload Linux packages to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          # Create if missing, or publish if draft
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --draft=false --prerelease=false
+          else
+            gh release create "$TAG" --title "$TAG" --generate-notes --latest
+          fi
+          # Upload Linux packages and metadata
+          FILES=(release/emdash-*.AppImage release/emdash-*.deb)
+          if [ -f release/latest-linux.yml ]; then FILES+=(release/latest-linux.yml); fi
+          gh release upload "$TAG" "${FILES[@]}" --clobber
 
   release-mac:
     # Run for tagged pushes (normal release) and for manual runs (dry run or ad-hoc release)

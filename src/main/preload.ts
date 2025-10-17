@@ -146,6 +146,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   githubGetRepositories: () => ipcRenderer.invoke('github:getRepositories'),
   githubCloneRepository: (repoUrl: string, localPath: string) =>
     ipcRenderer.invoke('github:cloneRepository', repoUrl, localPath),
+  githubListPullRequests: (projectPath: string) =>
+    ipcRenderer.invoke('github:listPullRequests', { projectPath }),
+  githubCreatePullRequestWorktree: (args: {
+    projectPath: string;
+    projectId: string;
+    prNumber: number;
+    prTitle?: string;
+    workspaceName?: string;
+    branchName?: string;
+  }) => ipcRenderer.invoke('github:createPullRequestWorktree', args),
   githubLogout: () => ipcRenderer.invoke('github:logout'),
   // Linear integration
   linearSaveToken: (token: string) => ipcRenderer.invoke('linear:saveToken', token),
@@ -427,6 +437,23 @@ export interface ElectronAPI {
     repoUrl: string,
     localPath: string
   ) => Promise<{ success: boolean; error?: string }>;
+  githubListPullRequests: (
+    projectPath: string
+  ) => Promise<{ success: boolean; prs?: any[]; error?: string }>;
+  githubCreatePullRequestWorktree: (args: {
+    projectPath: string;
+    projectId: string;
+    prNumber: number;
+    prTitle?: string;
+    workspaceName?: string;
+    branchName?: string;
+  }) => Promise<{
+    success: boolean;
+    worktree?: any;
+    branchName?: string;
+    workspaceName?: string;
+    error?: string;
+  }>;
   githubLogout: () => Promise<void>;
 
   // Database methods

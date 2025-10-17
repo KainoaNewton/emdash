@@ -1,11 +1,21 @@
 import { ipcMain } from 'electron';
 import { log } from '../lib/logger';
 import { GitHubService } from '../services/GitHubService';
+import { worktreeService } from '../services/WorktreeService';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import * as path from 'path';
+import * as fs from 'fs';
 
 const execAsync = promisify(exec);
 const githubService = new GitHubService();
+
+const slugify = (name: string) =>
+  name
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
 
 export function registerGithubIpc() {
   ipcMain.handle('github:connect', async (_, projectPath: string) => {
@@ -127,4 +137,86 @@ export function registerGithubIpc() {
       log.error('Failed to logout:', error);
     }
   });
+
+  ipcMain.handle(
+    'github:listPullRequests',
+    async (_, args: { projectPath: string }) => {
+      const projectPath = args?.projectPath;
+      if (!projectPath) {
+        return { success: false, error: 'Project path is required' };
+      }
+
+      try {
+        const prs = await githubService.getPullRequests(projectPath);
+        return { success: true, prs };
+      } catch (error) {
+        log.error('Failed to list pull requests:', error);
+        const message =
+          error instanceof Error ? error.message : 'Unable to list pull requests via GitHub CLI';
+        return { success: false, error: message };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    'github:createPullRequestWorktree',
+    async (
+      _,
+      args: {
+        projectPath: string;
+        projectId: string;
+        prNumber: number;
+        prTitle?: string;
+        workspaceName?: string;
+        branchName?: string;
+      }
+    ) => {
+      const { projectPath, projectId, prNumber } = args || ({} as typeof args);
+
+      if (!projectPath || !projectId || !prNumber) {
+        return { success: false, error: 'Missing required parameters' };
+      }
+
+      const defaultSlug = slugify(args.prTitle || `pr-${prNumber}`) || `pr-${prNumber}`;
+      const workspaceName =
+        args.workspaceName && args.workspaceName.trim().length > 0
+          ? args.workspaceName.trim()
+          : `pr-${prNumber}-${defaultSlug}`;
+      const branchName = args.branchName || `pr/${prNumber}`;
+
+      try {
+        const currentWorktrees = await worktreeService.listWorktrees(projectPath);
+        const existing = currentWorktrees.find((wt) => wt.branch === branchName);
+
+        if (existing) {
+          return { success: true, worktree: existing, branchName, workspaceName: existing.name };
+        }
+
+        await githubService.ensurePullRequestBranch(projectPath, prNumber, branchName);
+
+        const worktreesDir = path.resolve(projectPath, '..', 'worktrees');
+        const slug = slugify(workspaceName) || `pr-${prNumber}`;
+        let worktreePath = path.join(worktreesDir, slug);
+
+        if (fs.existsSync(worktreePath)) {
+          worktreePath = path.join(worktreesDir, `${slug}-${Date.now()}`);
+        }
+
+        const worktree = await worktreeService.createWorktreeFromBranch(
+          projectPath,
+          workspaceName,
+          branchName,
+          projectId,
+          { worktreePath }
+        );
+
+        return { success: true, worktree, branchName, workspaceName };
+      } catch (error) {
+        log.error('Failed to create PR worktree:', error);
+        const message =
+          error instanceof Error ? error.message : 'Unable to create PR worktree via GitHub CLI';
+        return { success: false, error: message };
+      }
+    }
+  );
 }

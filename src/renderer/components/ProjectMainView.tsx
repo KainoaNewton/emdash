@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Button } from './ui/button';
-import { GitBranch, Plus, Loader2, Trash } from 'lucide-react';
+import { GitBranch, Plus, Loader2 } from 'lucide-react';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList } from './ui/breadcrumb';
 import { Badge } from './ui/badge';
 import { Separator } from './ui/separator';
@@ -56,6 +56,7 @@ function WorkspaceRow({
   onDelete: () => void | Promise<void>;
 }) {
   const [isRunning, setIsRunning] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const { pr } = usePrStatus(ws.path);
   const { totalAdditions, totalDeletions, isLoading } = useWorkspaceChanges(ws.path, ws.id);
 
@@ -123,7 +124,16 @@ function WorkspaceRow({
 
         <WorkspaceDeleteButton
           workspaceName={ws.name}
-          onConfirm={onDelete}
+          onConfirm={async () => {
+            try {
+              setIsDeleting(true);
+              await onDelete();
+            } finally {
+              // If deletion succeeds, this row will unmount; if it fails, revert spinner
+              setIsDeleting(false);
+            }
+          }}
+          isDeleting={isDeleting}
           aria-label={`Delete workspace ${ws.name}`}
           className="inline-flex items-center justify-center rounded p-2 text-muted-foreground hover:bg-transparent hover:text-destructive focus-visible:ring-0"
         />
@@ -149,6 +159,8 @@ const ProjectMainView: React.FC<ProjectMainViewProps> = ({
   onDeleteWorkspace,
   isCreatingWorkspace = false,
 }) => {
+  // PR list functionality is temporarily disabled.
+
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
       <div className="flex-1 overflow-y-auto">
@@ -228,6 +240,8 @@ const ProjectMainView: React.FC<ProjectMainViewProps> = ({
                 </AlertDescription>
               </Alert>
             )}
+
+            {/* Pull Requests section temporarily removed */}
           </div>
         </div>
       </div>

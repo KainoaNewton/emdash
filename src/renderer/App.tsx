@@ -92,6 +92,13 @@ interface Project {
 interface WorkspaceMetadata {
   linearIssue?: LinearIssueSummary | null;
   initialPrompt?: string | null;
+  pullRequest?: {
+    number: number;
+    title: string;
+    url?: string;
+    author?: string | null;
+    branch?: string;
+  } | null;
 }
 
 interface Workspace {
@@ -739,6 +746,8 @@ const AppContent: React.FC = () => {
       setIsCreatingWorkspace(false);
     }
   };
+
+  // PR checkout via PR list is disabled; handler removed
 
   const handleGoHome = () => {
     setSelectedProject(null);

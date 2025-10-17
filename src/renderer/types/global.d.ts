@@ -105,6 +105,23 @@ declare global {
         repoUrl: string,
         localPath: string
       ) => Promise<{ success: boolean; error?: string }>;
+      githubListPullRequests: (
+        projectPath: string
+      ) => Promise<{ success: boolean; prs?: any[]; error?: string }>;
+      githubCreatePullRequestWorktree: (args: {
+        projectPath: string;
+        projectId: string;
+        prNumber: number;
+        prTitle?: string;
+        workspaceName?: string;
+        branchName?: string;
+      }) => Promise<{
+        success: boolean;
+        worktree?: any;
+        branchName?: string;
+        workspaceName?: string;
+        error?: string;
+      }>;
       githubLogout: () => Promise<void>;
       getSettings: () => Promise<any>;
       updateSettings: (settings: any) => Promise<void>;

@@ -12,6 +12,7 @@ import ampLogo from '../../assets/images/ampcode.png';
 import opencodeLogo from '../../assets/images/opencode.png';
 import charmLogo from '../../assets/images/charm.png';
 import augmentLogo from '../../assets/images/augmentcode.png';
+import qwenLogo from '../../assets/images/qwen.png';
 
 interface CliProvidersListProps {
   providers: CliProviderStatus[];
@@ -75,6 +76,12 @@ export const BASE_CLI_PROVIDERS: CliProviderStatus[] = [
     status: 'missing',
     docUrl: 'https://docs.augmentcode.com/cli/overview',
   },
+  {
+    id: 'qwen',
+    name: 'Qwen Code',
+    status: 'missing',
+    docUrl: 'https://github.com/QwenLM/qwen-code',
+  },
 ];
 
 const PROVIDER_LOGOS: Record<string, string> = {
@@ -88,6 +95,7 @@ const PROVIDER_LOGOS: Record<string, string> = {
   opencode: opencodeLogo,
   charm: charmLogo,
   auggie: augmentLogo,
+  qwen: qwenLogo,
 };
 
 const renderProviderRow = (provider: CliProviderStatus) => {

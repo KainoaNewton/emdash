@@ -89,34 +89,7 @@ export class WorktreeService {
       }
 
       // Ensure codex logs are ignored in this worktree
-      try {
-        const gitMeta = path.join(worktreePath, '.git');
-        let gitDir = gitMeta;
-        if (fs.existsSync(gitMeta) && fs.statSync(gitMeta).isFile()) {
-          try {
-            const content = fs.readFileSync(gitMeta, 'utf8');
-            const m = content.match(/gitdir:\s*(.*)\s*$/i);
-            if (m && m[1]) {
-              gitDir = path.resolve(worktreePath, m[1].trim());
-            }
-          } catch {}
-        }
-        const excludePath = path.join(gitDir, 'info', 'exclude');
-        try {
-          const dir = path.dirname(excludePath);
-          if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-          let current = '';
-          try {
-            current = fs.readFileSync(excludePath, 'utf8');
-          } catch {}
-          if (!current.includes('codex-stream.log')) {
-            fs.appendFileSync(
-              excludePath,
-              (current.endsWith('\n') || current === '' ? '' : '\n') + 'codex-stream.log\n'
-            );
-          }
-        } catch {}
-      } catch {}
+      this.ensureCodexLogIgnored(worktreePath);
 
       const worktreeInfo: WorktreeInfo = {
         id: worktreeId,
@@ -169,25 +142,33 @@ export class WorktreeService {
           const branchMatch = line.match(/\[([^\]]+)\]/);
           const branch = branchMatch ? branchMatch[1] : 'unknown';
 
-          // Only include worktrees that are agent workspaces
-          if (branch.startsWith('agent/')) {
-            // Try to find existing worktree in memory by path
-            const existing = Array.from(this.worktrees.values()).find(
+          const managedBranch =
+            branch.startsWith('agent/') ||
+            branch.startsWith('pr/') ||
+            branch.startsWith('orch/');
+
+          if (!managedBranch) {
+            const tracked = Array.from(this.worktrees.values()).find(
               (wt) => wt.path === worktreePath
             );
-
-            worktrees.push(
-              existing ?? {
-                id: this.stableIdFromPath(worktreePath),
-                name: path.basename(worktreePath),
-                branch,
-                path: worktreePath,
-                projectId: path.basename(projectPath),
-                status: 'active',
-                createdAt: new Date().toISOString(),
-              }
-            );
+            if (!tracked) continue;
           }
+
+          const existing = Array.from(this.worktrees.values()).find(
+            (wt) => wt.path === worktreePath
+          );
+
+          worktrees.push(
+            existing ?? {
+              id: this.stableIdFromPath(worktreePath),
+              name: path.basename(worktreePath),
+              branch,
+              path: worktreePath,
+              projectId: path.basename(projectPath),
+              status: 'active',
+              createdAt: new Date().toISOString(),
+            }
+          );
         }
       }
 
@@ -361,6 +342,91 @@ export class WorktreeService {
    */
   getAllWorktrees(): WorktreeInfo[] {
     return Array.from(this.worktrees.values());
+  }
+
+  private ensureCodexLogIgnored(worktreePath: string) {
+    try {
+      const gitMeta = path.join(worktreePath, '.git');
+      let gitDir = gitMeta;
+      if (fs.existsSync(gitMeta) && fs.statSync(gitMeta).isFile()) {
+        try {
+          const content = fs.readFileSync(gitMeta, 'utf8');
+          const m = content.match(/gitdir:\s*(.*)\s*$/i);
+          if (m && m[1]) {
+            gitDir = path.resolve(worktreePath, m[1].trim());
+          }
+        } catch {}
+      }
+      const excludePath = path.join(gitDir, 'info', 'exclude');
+      try {
+        const dir = path.dirname(excludePath);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        let current = '';
+        try {
+          current = fs.readFileSync(excludePath, 'utf8');
+        } catch {}
+        if (!current.includes('codex-stream.log')) {
+          fs.appendFileSync(
+            excludePath,
+            (current.endsWith('\n') || current === '' ? '' : '\n') + 'codex-stream.log\n'
+          );
+        }
+      } catch {}
+    } catch {}
+  }
+
+  async createWorktreeFromBranch(
+    projectPath: string,
+    workspaceName: string,
+    branchName: string,
+    projectId: string,
+    options?: { worktreePath?: string }
+  ): Promise<WorktreeInfo> {
+    const normalizedName = workspaceName || branchName.replace(/\//g, '-');
+    const sluggedName = this.slugify(normalizedName) || 'workspace';
+    const targetPath =
+      options?.worktreePath ||
+      path.join(projectPath, '..', `worktrees/${sluggedName}-${Date.now()}`);
+    const worktreePath = path.resolve(targetPath);
+
+    if (fs.existsSync(worktreePath)) {
+      throw new Error(`Worktree directory already exists: ${worktreePath}`);
+    }
+
+    const worktreesDir = path.dirname(worktreePath);
+    if (!fs.existsSync(worktreesDir)) {
+      fs.mkdirSync(worktreesDir, { recursive: true });
+    }
+
+    try {
+      await execFileAsync('git', ['worktree', 'add', worktreePath, branchName], {
+        cwd: projectPath,
+      });
+    } catch (error) {
+      throw new Error(
+        `Failed to create worktree for branch ${branchName}: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+
+    if (!fs.existsSync(worktreePath)) {
+      throw new Error(`Worktree directory was not created: ${worktreePath}`);
+    }
+
+    this.ensureCodexLogIgnored(worktreePath);
+
+    const worktreeInfo: WorktreeInfo = {
+      id: this.stableIdFromPath(worktreePath),
+      name: normalizedName,
+      branch: branchName,
+      path: worktreePath,
+      projectId,
+      status: 'active',
+      createdAt: new Date().toISOString(),
+    };
+
+    this.worktrees.set(worktreeInfo.id, worktreeInfo);
+
+    return worktreeInfo;
   }
 }
 

@@ -6,7 +6,7 @@
   alt="Emdash" width="900">
   </p>
 
-emdash is a UI layer for running multiple coding agents in parallel — currently supporting OpenAI Codex CLI, Claude Code CLI, Droid (Factory CLI), Gemini CLI, Cursor CLI, Amp Code CLI, GitHub Copilot CLI, and Charm CLI. Each agent runs in its own Git worktree so you can fan out tasks, keep changes compartmentalized, and manage everything from a single UI.
+emdash is a cross-platform UI layer for running multiple coding agents in parallel — currently supporting OpenAI Codex CLI, Claude Code CLI, Droid (Factory CLI), Gemini CLI, Cursor CLI, Amp Code CLI, GitHub Copilot CLI, and Charm CLI. Each agent runs in its own Git worktree so you can fan out tasks, keep changes compartmentalized, and manage everything from a single UI.
 
 <hr style="border:0; height:1px; background:#d0d7de; margin:24px 0;">
 
@@ -43,10 +43,24 @@ emdash is a UI layer for running multiple coding agents in parallel — currentl
 
 ## Install
 
+### macOS
+
 - Download for macOS (Apple Silicon): https://github.com/generalaction/emdash/releases/latest/download/emdash-arm64.dmg
 - Download for macOS (Intel x64): https://github.com/generalaction/emdash/releases/latest/download/emdash-x64.dmg
 
-Either download the DMG from Releases (or click the link above), or run the app locally — see Requirements and Getting Started below.
+### Linux
+
+- Download AppImage (x64): https://github.com/generalaction/emdash/releases/latest/download/emdash-x64.AppImage
+- Download Debian package (x64): https://github.com/generalaction/emdash/releases/latest/download/emdash-x64.deb
+
+### Windows
+
+- Download Portable Exe (x64): https://github.com/generalaction/emdash/releases/latest/download/emdash-x64.exe
+- Download NSIS Installer (x64): https://github.com/generalaction/emdash/releases/latest/download/emdash-x64-installer.exe
+
+### Manual Installation
+
+Either download the package for your platform from Releases (links above), or build and run the app locally — see Requirements and Getting Started below.
 
 ### Homebrew
 
@@ -126,6 +140,90 @@ gh auth login
 6. Run the app: `npm run dev`
 
 In the chat input, use the provider selector to switch between Codex and Claude Code. Once a chat has started with Codex or Claude, the provider is locked for that chat.
+
+## Build from Source
+
+### macOS
+
+```bash
+npm run package:mac
+```
+
+Outputs: `release/emdash-arm64.dmg` and `release/emdash-arm64.zip`
+
+### Linux
+
+Install build dependencies:
+
+```bash
+# Debian/Ubuntu
+sudo apt-get install -y python3 python3-dev build-essential
+
+# Fedora/RHEL
+sudo dnf install -y python3 python3-devel gcc gcc-c++ make
+
+# Arch
+sudo pacman -S python base-devel
+```
+
+Build the app:
+
+```bash
+npm run package:linux
+```
+
+Outputs: `release/emdash-x64.AppImage` and `release/emdash-x64.deb`
+
+**AppImage Usage:**
+```bash
+chmod +x emdash-x64.AppImage
+./emdash-x64.AppImage
+```
+
+**Debian Package:**
+```bash
+sudo dpkg -i emdash-x64.deb
+emdash  # Run from command line after install
+```
+
+### Windows
+
+Install build dependencies (via [Chocolatey](https://chocolatey.org/)):
+
+```powershell
+choco install python build-essentials
+```
+
+Or install manually:
+- [Python 3](https://www.python.org/downloads/)
+- [Visual Studio Build Tools](https://visualstudio.microsoft.com/downloads/) (or Visual Studio with C++ workload)
+
+Build the app:
+
+```bash
+npm run package:win
+```
+
+Outputs: `release/emdash-x64.exe` (portable) and `release/emdash-x64-installer.exe` (NSIS installer)
+
+### Cross-Platform Build
+
+To build for all platforms:
+
+```bash
+npm run build        # Compiles TypeScript and Vite
+npm run package      # Builds for current platform
+```
+
+To build for a specific platform on macOS:
+
+```bash
+npm run package:mac      # macOS
+npm run package:linux    # Linux (requires cross-build tools)
+npm run package:win      # Windows (requires cross-build tools)
+```
+
+**Note:** Native modules (sqlite3, node-pty, keytar) require platform-specific compilation. Building for a different platform than your current OS may require additional cross-compilation setup.
 
 ## Demos
 

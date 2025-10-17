@@ -1,7 +1,7 @@
 {
   "name": "emdash",
   "version": "0.3.8",
-  "description": "A macOS Electron app that orchestrates multiple coding agents in parallel",
+  "description": "A cross-platform Electron app that orchestrates multiple coding agents in parallel",
   "main": "dist/main/main.js",
   "scripts": {
     "d": "npm i && npm run dev",
@@ -12,6 +12,9 @@
     "build:main": "tsc -p tsconfig.main.json",
     "build:renderer": "vite build",
     "package": "npm run build && electron-builder",
+    "package:mac": "npm run build && electron-builder --mac",
+    "package:linux": "npm run build && electron-builder --linux",
+    "package:win": "npm run build && electron-builder --win",
     "postinstall": "electron-rebuild -v 28.3.3 -w \"sqlite3,node-pty,keytar\"",
     "lint": "eslint . --ext .ts,.tsx",
     "format": "prettier --write .",
@@ -25,7 +28,10 @@
     "claude",
     "openai"
   ],
-  "author": "Your Name",
+  "author": {
+    "name": "Emdash Contributors",
+    "email": "support@emdash.sh"
+  },
   "devDependencies": {
     "@electron/rebuild": "^4.0.1",
     "@types/node": "^20.10.0",
@@ -118,6 +124,39 @@
     },
     "dmg": {
       "icon": "src/assets/images/emdash/emdash.icns"
+    },
+    "linux": {
+      "category": "Development",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
     }
   }
 }

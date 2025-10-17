@@ -29,6 +29,8 @@ export const WorkspaceItem: React.FC<WorkspaceItemProps> = ({ workspace, onDelet
   const { pr } = usePrStatus(workspace.path);
   const isRunning = useWorkspaceBusy(workspace.id);
 
+  const [isDeleting, setIsDeleting] = React.useState(false);
+
   return (
     <div className="flex min-w-0 items-center justify-between">
       <div className="flex min-w-0 flex-1 items-center gap-2 py-1">
@@ -51,7 +53,15 @@ export const WorkspaceItem: React.FC<WorkspaceItemProps> = ({ workspace, onDelet
             {(pr.state === 'MERGED' || pr.state === 'CLOSED') && onDelete ? (
               <WorkspaceDeleteButton
                 workspaceName={workspace.name}
-                onConfirm={onDelete}
+                onConfirm={async () => {
+                  try {
+                    setIsDeleting(true);
+                    await onDelete();
+                  } finally {
+                    setIsDeleting(false);
+                  }
+                }}
+                isDeleting={isDeleting}
                 aria-label={`Delete workspace ${workspace.name}`}
                 className="inline-flex items-center justify-center rounded p-1 text-muted-foreground hover:bg-muted hover:text-destructive"
               />
