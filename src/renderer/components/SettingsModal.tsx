@@ -48,63 +48,7 @@ interface SettingsSection {
   render?: () => React.ReactNode;
 }
 
-const TAB_DETAILS: Record<
-  SettingsTab,
-  {
-    icon: LucideIcon;
-    label: string;
-    title: string;
-    description: string;
-    sections: SettingsSection[];
-  }
-> = {
-  general: {
-    icon: Settings2,
-    label: 'General',
-    title: 'General',
-    description: '',
-    sections: [
-      {
-        title: 'Theme',
-        Component: ThemeCard,
-      },
-      {
-        title: 'Privacy & Telemetry',
-        Component: TelemetryCard,
-      },
-      {
-        title: 'Workspace defaults',
-        description: 'General configuration options will appear here soon.',
-      },
-    ],
-  },
-  account: {
-    icon: User,
-    label: 'Account',
-    title: 'Account',
-    description: '',
-    sections: [
-      {
-        title: 'Linear integration',
-        Component: LinearIntegrationCard,
-      },
-    ],
-  },
-  versions: {
-    icon: History,
-    label: 'Versions',
-    title: 'Versions',
-    description: '',
-    sections: [
-      {
-        title: 'Versions',
-        Component: AppVersionCard,
-      },
-    ],
-  },
-};
-
-const ORDERED_TABS: SettingsTab[] = ['general', 'account', 'versions'];
+const ORDERED_TABS: SettingsTab[] = ['general', 'connections'];
 
 const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
@@ -161,21 +105,16 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
   }, []);
 
   const tabDetails = useMemo(() => {
-    const base = {
+    return {
       general: {
         icon: Settings2,
         label: 'General',
         title: 'General',
         description: '',
         sections: [
-          {
-            title: 'Telemetry',
-            render: () => <TelemetryCard />,
-          },
-          {
-            title: 'Version',
-            render: () => <VersionCard />,
-          },
+          { title: 'Theme', render: () => <ThemeCard /> },
+          { title: 'Privacy & Telemetry', render: () => <TelemetryCard /> },
+          { title: 'Version', render: () => <VersionCard /> },
         ],
       },
       connections: {
@@ -184,11 +123,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
         title: 'Connections',
         description: '',
         sections: [
-          {
-            title: 'Integrations',
-            description: '',
-            render: () => <IntegrationsCard />,
-          },
+          { title: 'Integrations', render: () => <IntegrationsCard /> },
           {
             title: 'CLI providers',
             render: () => (
@@ -220,18 +155,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
           },
         ],
       },
-    } satisfies Record<
-      SettingsTab,
-      {
-        icon: LucideIcon;
-        label: string;
-        title: string;
-        description: string;
-        sections: SettingsSection[];
-      }
-    >;
-
-    return base;
+    } as const;
   }, [cliProviders, cliLoading, cliError, fetchCliProviders]);
 
   const activeTabDetails = tabDetails[activeTab];
