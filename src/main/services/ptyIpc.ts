@@ -21,6 +21,104 @@ function appendBuffer(id: string, chunk: string) {
   buffers.set(id, arr);
 }
 
+// --- Input/Output sanitization ---------------------------------------------
+// Remove OSC (Operating System Command) sequences and common stray fragments
+// so they don't leak into app inputs or visible output when switching/reattaching.
+type OscState = {
+  inOsc: boolean;
+  sawEscInOsc: boolean; // for detecting ST terminator ESC \\
+};
+
+const inputOscState = new Map<string, OscState>();
+function sanitizeInputChunk(id: string, chunk: string): string {
+  let state = inputOscState.get(id);
+  if (!state) {
+    state = { inOsc: false, sawEscInOsc: false };
+    inputOscState.set(id, state);
+  }
+  let out = '';
+  for (let i = 0; i < chunk.length; i++) {
+    const ch = chunk[i];
+    const code = ch.charCodeAt(0);
+    if (!state.inOsc) {
+      if (code === 0x1b && i + 1 < chunk.length && chunk[i + 1] === ']') {
+        state.inOsc = true;
+        state.sawEscInOsc = false;
+        i++;
+        continue;
+      }
+      out += ch;
+      continue;
+    }
+    if (code === 0x07) {
+      state.inOsc = false;
+      state.sawEscInOsc = false;
+      continue;
+    }
+    if (state.sawEscInOsc) {
+      if (ch === '\\') {
+        state.inOsc = false;
+        state.sawEscInOsc = false;
+        continue;
+      }
+      state.sawEscInOsc = false;
+    }
+    if (code === 0x1b) {
+      state.sawEscInOsc = true;
+      continue;
+    }
+  }
+  return out;
+}
+
+const outputOscState = new Map<string, OscState>();
+function sanitizeOutputChunk(id: string, chunk: string): string {
+  let state = outputOscState.get(id);
+  if (!state) {
+    state = { inOsc: false, sawEscInOsc: false };
+    outputOscState.set(id, state);
+  }
+  let out = '';
+  for (let i = 0; i < chunk.length; i++) {
+    const ch = chunk[i];
+    const code = ch.charCodeAt(0);
+    if (!state.inOsc) {
+      if (code === 0x1b && i + 1 < chunk.length && chunk[i + 1] === ']') {
+        state.inOsc = true;
+        state.sawEscInOsc = false;
+        i++;
+        continue;
+      }
+      out += ch;
+      continue;
+    }
+    if (code === 0x07) {
+      state.inOsc = false;
+      state.sawEscInOsc = false;
+      continue;
+    }
+    if (state.sawEscInOsc) {
+      if (ch === '\\') {
+        state.inOsc = false;
+        state.sawEscInOsc = false;
+        continue;
+      }
+      state.sawEscInOsc = false;
+    }
+    if (code === 0x1b) {
+      state.sawEscInOsc = true;
+      continue;
+    }
+  }
+  // Strip stray color-reply fragments if OSC introducer got cooked away
+  out = out.replace(/(^|[\s>])(?:10|11|12);rgb:[0-9a-f]{1,4}\/[0-9a-f]{1,4}\/[0-9a-f]{1,4}(?:;rgb:[0-9a-f]{1,4}\/[0-9a-f]{1,4}\/[0-9a-f]{1,4})*(?=$|\s)/gi, '$1');
+  // Strip DA/CPR responses if they surface
+  out = out.replace(/\x1b\[\?\d+(?:;\d+)*[a-zA-Z]/g, '');
+  out = out.replace(/\x1b\[\d+(?:;\d+)*R/g, '');
+  out = out.replace(/(^|[\s>])\d+(?:;\d+)*[cR](?=$|\s)/g, '$1');
+  return out;
+}
+
 export function registerPtyIpc(): void {
   ipcMain.handle(
     'pty:start',
@@ -47,8 +145,11 @@ export function registerPtyIpc(): void {
         // Attach listeners once per PTY id
         if (!listeners.has(id)) {
           proc.onData((data) => {
-            appendBuffer(id, data);
-            owners.get(id)?.send(`pty:data:${id}`, data);
+            const cleaned = sanitizeOutputChunk(id, data);
+            if (cleaned) {
+              appendBuffer(id, cleaned);
+              owners.get(id)?.send(`pty:data:${id}`, cleaned);
+            }
           });
 
           proc.onExit(({ exitCode, signal }) => {
@@ -90,7 +191,8 @@ export function registerPtyIpc(): void {
 
   ipcMain.on('pty:input', (_event, args: { id: string; data: string }) => {
     try {
-      writePty(args.id, args.data);
+      const cleaned = sanitizeInputChunk(args.id, args.data);
+      if (cleaned) writePty(args.id, cleaned);
     } catch (e) {
       log.error('pty:input error', e);
     }
