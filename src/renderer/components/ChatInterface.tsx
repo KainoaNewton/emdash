@@ -455,7 +455,7 @@ const ChatInterface: React.FC<Props> = ({ workspace, projectName, className, ini
           <div className="mt-4 min-h-0 flex-1 px-6">
             <div
               className={`mx-auto h-full max-w-4xl overflow-hidden rounded-md ${
-                provider === 'charm' ? (effectiveTheme === 'dark' ? 'bg-gray-800' : 'bg-white') : ''
+                effectiveTheme === 'dark' ? 'bg-gray-800' : 'bg-white'
               }`}
             >
               <TerminalPane
@@ -475,16 +475,28 @@ const ChatInterface: React.FC<Props> = ({ workspace, projectName, className, ini
                 }}
                 onStartSuccess={() => setCliStartFailed(false)}
                 variant={effectiveTheme === 'dark' ? 'dark' : 'light'}
-                themeOverride={
-                  provider === 'charm'
-                    ? { background: effectiveTheme === 'dark' ? '#1f2937' : '#ffffff' }
-                    : undefined
-                }
-                contentFilter={
-                  provider === 'charm' && effectiveTheme !== 'dark'
-                    ? 'invert(1) hue-rotate(180deg) brightness(1.1) contrast(1.05)'
-                    : undefined
-                }
+                themeOverride={(() => {
+                  // Dark mode: keep a coherent dark base background
+                  if (effectiveTheme === 'dark') {
+                    return { background: '#1f2937' };
+                  }
+                  // Light mode: for dark-by-default TUIs (OpenCode, Charm), swap ANSI black/white
+                  if (provider === 'opencode' || provider === 'charm') {
+                    return {
+                      background: '#ffffff',
+                      foreground: '#000000',
+                      cursor: '#000000',
+                      selectionBackground: '#00000022',
+                      // Swap ANSI background mapping so apps using "black" as bg become white
+                      black: '#ffffff',
+                      white: '#000000',
+                      brightBlack: '#e5e7eb', // soft gray for "bright black"
+                      brightWhite: '#000000',
+                    };
+                  }
+                  // Default light base
+                  return { background: '#ffffff' };
+                })()}
                 className="h-full w-full"
               />
             </div>
