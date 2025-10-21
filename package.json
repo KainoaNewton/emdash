@@ -94,6 +94,7 @@
     "tailwindcss-animate": "^1.0.7"
   },
   "build": {
+    "npmRebuild": false,
     "appId": "com.emdash",
     "productName": "emdash",
     "directories": {
