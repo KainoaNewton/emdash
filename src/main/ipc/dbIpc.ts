@@ -3,10 +3,8 @@ import { log } from '../lib/logger';
 import { databaseService } from '../services/DatabaseService';
 
 export function registerDatabaseIpc() {
-  // Ensure the database is initialized soon after app start, but don't crash if it fails
-  databaseService.initialize().catch((error) => {
-    log.error('Database initialization failed (non-fatal):', error);
-  });
+  // Do NOT eagerly initialize sqlite at startup — it can crash on machines
+  // with mismatched native bindings. Initialize lazily inside handlers only.
 
   ipcMain.handle('db:getProjects', async () => {
     try {

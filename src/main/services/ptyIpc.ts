@@ -22,6 +22,7 @@ function appendBuffer(id: string, chunk: string) {
 }
 
 export function registerPtyIpc(): void {
+  const PTY_DISABLED = /^(1|true|yes)$/i.test(process.env.EMDASH_DISABLE_PTY || '');
   ipcMain.handle(
     'pty:start',
     (
@@ -36,6 +37,15 @@ export function registerPtyIpc(): void {
       }
     ) => {
       try {
+        if (PTY_DISABLED) {
+          // Pretend PTY started to keep UI responsive when PTY is disabled
+          try {
+            const { BrowserWindow } = require('electron');
+            const windows = BrowserWindow.getAllWindows();
+            windows.forEach((w: any) => w.webContents.send('pty:started', { id: args.id }));
+          } catch {}
+          return { ok: true };
+        }
         const { id, cwd, shell, env, cols, rows } = args;
         // Reuse existing PTY if present; otherwise create new
         const existing = getPty(id);
@@ -90,7 +100,7 @@ export function registerPtyIpc(): void {
 
   ipcMain.on('pty:input', (_event, args: { id: string; data: string }) => {
     try {
-      writePty(args.id, args.data);
+      if (!PTY_DISABLED) writePty(args.id, args.data);
     } catch (e) {
       log.error('pty:input error', e);
     }
@@ -98,7 +108,7 @@ export function registerPtyIpc(): void {
 
   ipcMain.on('pty:resize', (_event, args: { id: string; cols: number; rows: number }) => {
     try {
-      resizePty(args.id, args.cols, args.rows);
+      if (!PTY_DISABLED) resizePty(args.id, args.cols, args.rows);
     } catch (e) {
       log.error('pty:resize error', e);
     }
@@ -106,7 +116,7 @@ export function registerPtyIpc(): void {
 
   ipcMain.on('pty:kill', (_event, args: { id: string }) => {
     try {
-      killPty(args.id);
+      if (!PTY_DISABLED) killPty(args.id);
       owners.delete(args.id);
       listeners.delete(args.id);
       buffers.delete(args.id);
