@@ -83,6 +83,17 @@ jobs:
           sed -i '' "s#__PH_KEY__#${PH_KEY}#g" dist/main/appConfig.json
           echo "Wrote dist/main/appConfig.json"
 
+      - name: Rebuild native modules for Electron (per-arch)
+        run: |
+          set -euo pipefail
+          ELECTRON_VERSION=$(node -p "require('electron/package.json').version")
+          ARCH_INPUT="${{ github.event.inputs.arch }}"
+          if [ -z "$ARCH_INPUT" ] || [ "$ARCH_INPUT" = "both" ]; then ARGS=(x64 arm64); else ARGS=("$ARCH_INPUT"); fi
+          echo "Rebuilding sqlite3,node-pty,keytar for Electron $ELECTRON_VERSION: ${ARGS[*]}"
+          for A in "${ARGS[@]}"; do
+            npx electron-rebuild -f -a "$A" -v "$ELECTRON_VERSION" -w sqlite3,node-pty,keytar
+          done
+
       - name: Build DMG(s) (no publish)
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
@@ -304,6 +315,17 @@ jobs:
           else
             echo "Unknown arch input: $ARCH_INPUT" && exit 1
           fi
+          # Rebuild native modules for each requested arch before packaging
+          ELECTRON_VERSION=$(node -p "require('electron/package.json').version")
+          for flag in $FLAGS; do
+            case "$flag" in
+              --x64)  A=x64 ;;
+              --arm64) A=arm64 ;;
+              *) continue ;;
+            esac
+            echo "electron-rebuild for $A (Electron $ELECTRON_VERSION)"
+            npx electron-rebuild -f -a "$A" -v "$ELECTRON_VERSION" -w sqlite3,node-pty,keytar
+          done
           echo "Building signed for: $FLAGS"
           # Build signed + notarized artifacts locally but DO NOT publish yet.
           # We will staple and validate before uploading to the GitHub Release.
