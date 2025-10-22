@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import type { ShortcutConfig, GlobalShortcutHandlers, ShortcutMapping } from '../types/shortcuts';
+import type { ShortcutConfig, GlobalShortcutHandlers, ShortcutMapping } from '#types/shortcuts';
 
 /**
  * ==============================================================================

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Repo, Run } from '../types';
+import { Repo, Run } from '#types';
 import RunLauncher from './RunLauncher';
 import RunList from './RunList';
 import { FolderOpen, Github, Globe } from 'lucide-react';

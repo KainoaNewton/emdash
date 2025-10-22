@@ -13,7 +13,7 @@ import RoutingInfoCard from './RoutingInfoCard';
 import { Workflow } from 'lucide-react';
 import { Badge } from './ui/badge';
 import type { UiProvider } from '@/providers/meta';
-import { type Provider } from '../types';
+import { type Provider } from '#types';
 import openaiLogo from '../../assets/images/openai.png';
 import claudeLogo from '../../assets/images/claude.png';
 import factoryLogo from '../../assets/images/factorydroid.png';

@@ -9,7 +9,7 @@ import IntegrationsCard from './IntegrationsCard';
 import CliProvidersList, { BASE_CLI_PROVIDERS } from './CliProvidersList';
 import TelemetryCard from './TelemetryCard';
 import ThemeCard from './ThemeCard';
-import { CliProviderStatus } from '../types/connections';
+import { CliProviderStatus } from '#types/connections';
 import { Separator } from './ui/separator';
 
 const createDefaultCliProviders = (): CliProviderStatus[] =>

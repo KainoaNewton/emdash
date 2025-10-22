@@ -3,7 +3,7 @@ import { Input } from './ui/input';
 import { Select, SelectContent, SelectItem, SelectItemText, SelectTrigger } from './ui/select';
 import { Search } from 'lucide-react';
 import linearLogo from '../../assets/images/linear.png';
-import { type LinearIssueSummary } from '../types/linear';
+import { type LinearIssueSummary } from '#types/linear';
 import { Separator } from './ui/separator';
 import { Badge } from './ui/badge';
 import { Spinner } from './ui/spinner';

@@ -8,9 +8,9 @@ import { Spinner } from './ui/spinner';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from './ui/accordion';
 import { X, GitBranch } from 'lucide-react';
 import { ProviderSelector } from './ProviderSelector';
-import { type Provider } from '../types';
+import { type Provider } from '#types';
 import { Separator } from './ui/separator';
-import { type LinearIssueSummary } from '../types/linear';
+import { type LinearIssueSummary } from '#types/linear';
 import { LinearIssueSelector } from './LinearIssueSelector';
 
 interface WorkspaceModalProps {

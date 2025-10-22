@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { Sparkles } from 'lucide-react';
 import IntegrationRow from './IntegrationRow';
-import { CliProviderStatus } from '../types/connections';
+import { CliProviderStatus } from '#types/connections';
 import codexLogo from '../../assets/images/openai.png';
 import claudeLogo from '../../assets/images/claude.png';
 import droidLogo from '../../assets/images/factorydroid.png';

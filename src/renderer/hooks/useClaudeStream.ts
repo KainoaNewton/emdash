@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Message } from '../types/chat';
+import type { Message } from '#types/chat';
 
 declare const window: Window & {
   electronAPI: any;

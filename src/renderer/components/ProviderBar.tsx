@@ -1,7 +1,7 @@
 import React from 'react';
 import { ExternalLink } from 'lucide-react';
-import { type Provider } from '../types';
-import { type LinearIssueSummary } from '../types/linear';
+import { type Provider } from '#types';
+import { type LinearIssueSummary } from '#types/linear';
 import openaiLogo from '../../assets/images/openai.png';
 import linearLogo from '../../assets/images/linear.png';
 import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from './ui/tooltip';

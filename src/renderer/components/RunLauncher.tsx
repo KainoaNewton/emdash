@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Repo } from '../types';
+import { Repo } from '#types';
 import { useToast } from '../hooks/use-toast';
 
 interface RunLauncherProps {

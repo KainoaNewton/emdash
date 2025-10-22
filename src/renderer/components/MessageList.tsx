@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import type { Message } from '../types/chat';
+import type { Message } from '#types/chat';
 import { parseCodexOutput, parseCodexStream } from '../lib/codexParse';
 import { Reasoning, ReasoningContent, ReasoningTrigger } from '@/components/ai-elements/reasoning';
 import { Response } from '@/components/ai-elements/response';

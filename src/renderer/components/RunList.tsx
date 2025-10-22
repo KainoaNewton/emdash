@@ -1,5 +1,5 @@
 import React from 'react';
-import { Run } from '../types';
+import { Run } from '#types';
 
 interface RunListProps {
   runs: Run[];

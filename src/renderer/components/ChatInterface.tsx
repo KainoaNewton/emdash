@@ -10,9 +10,9 @@ import ProviderBar from './ProviderBar';
 import useCodexStream from '../hooks/useCodexStream';
 import useClaudeStream from '../hooks/useClaudeStream';
 import { useInitialPromptInjection } from '../hooks/useInitialPromptInjection';
-import { type Provider } from '../types';
+import { type Provider } from '#types';
 import { buildAttachmentsSection, buildImageAttachmentsSection } from '../lib/attachments';
-import { Workspace, Message } from '../types/chat';
+import { Workspace, Message } from '#types/chat';
 
 declare const window: Window & {
   electronAPI: {
