@@ -15,7 +15,8 @@ CREATE TABLE `messages` (
 	`sender` text NOT NULL,
 	`timestamp` text DEFAULT CURRENT_TIMESTAMP,
 	`metadata` text,
-	FOREIGN KEY (`conversation_id`) REFERENCES `conversations`(`id`) ON UPDATE no action ON DELETE cascade
+	FOREIGN KEY (`conversation_id`) REFERENCES `conversations`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "messages_sender_check" CHECK("messages"."sender" IN ('user', 'agent'))
 );
 --> statement-breakpoint
 CREATE INDEX `idx_messages_conversation_id` ON `messages` (`conversation_id`);--> statement-breakpoint
@@ -27,7 +28,7 @@ CREATE TABLE `projects` (
 	`git_remote` text,
 	`git_branch` text,
 	`github_repository` text,
-	`github_connected` integer DEFAULT false,
+	`github_connected` integer DEFAULT 0,
 	`created_at` text DEFAULT CURRENT_TIMESTAMP,
 	`updated_at` text DEFAULT CURRENT_TIMESTAMP
 );

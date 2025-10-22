@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "4990687d-b91b-41f0-9268-4c2a648778d7",
+  "id": "167b84d9-8248-4885-95ad-4b7fa67ebab0",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "conversations": {
@@ -153,7 +153,12 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {}
+      "checkConstraints": {
+        "messages_sender_check": {
+          "name": "messages_sender_check",
+          "value": "\"messages\".\"sender\" IN ('user', 'agent')"
+        }
+      }
     },
     "projects": {
       "name": "projects",
@@ -206,7 +211,7 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false,
-          "default": false
+          "default": "0"
         },
         "created_at": {
           "name": "created_at",

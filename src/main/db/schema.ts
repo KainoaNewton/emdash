@@ -1,10 +1,5 @@
 import { sql } from 'drizzle-orm';
-import {
-  index,
-  integer,
-  sqliteTable,
-  text,
-} from 'drizzle-orm/sqlite-core';
+import { check, index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
 export const projects = sqliteTable(
   'projects',
@@ -15,9 +10,7 @@ export const projects = sqliteTable(
     gitRemote: text('git_remote'),
     gitBranch: text('git_branch'),
     githubRepository: text('github_repository'),
-    githubConnected: integer('github_connected', { mode: 'boolean' }).default(
-      false
-    ),
+    githubConnected: integer('github_connected', { mode: 'boolean' }).default(sql`0`),
     createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
     updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
   },
@@ -82,6 +75,7 @@ export const messages = sqliteTable(
       table.conversationId
     ),
     messagesTimestampIdx: index('idx_messages_timestamp').on(table.timestamp),
+    messagesSenderCheck: check('messages_sender_check', sql`${table.sender} IN ('user', 'agent')`),
   })
 );
 
