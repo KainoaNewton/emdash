@@ -1,8 +1,26 @@
 import type sqlite3Type from 'sqlite3';
-import { promisify } from 'util';
 import { join } from 'path';
 import { app } from 'electron';
 import { existsSync, renameSync } from 'fs';
+import { asc, desc, eq, sql } from 'drizzle-orm';
+import type {
+  AsyncBatchRemoteCallback,
+  AsyncRemoteCallback,
+  SqliteRemoteDatabase,
+} from 'drizzle-orm/sqlite-proxy';
+import { drizzle } from 'drizzle-orm/sqlite-proxy';
+import { migrate } from 'drizzle-orm/sqlite-proxy/migrator';
+import {
+  schema,
+  projects,
+  workspaces,
+  conversations,
+  messages,
+  type ConversationRow,
+  type MessageRow,
+  type ProjectRow,
+  type WorkspaceRow,
+} from '../db/schema';
 
 export interface Project {
   id: string;
@@ -52,8 +70,9 @@ export interface Message {
 }
 
 export class DatabaseService {
-  private db: sqlite3Type.Database | null = null;
   private sqlite3: typeof sqlite3Type | null = null;
+  private connection: sqlite3Type.Database | null = null;
+  private orm: SqliteRemoteDatabase<typeof schema> | null = null;
   private dbPath: string;
   private disabled: boolean = false;
 
@@ -96,376 +115,197 @@ export class DatabaseService {
   }
 
   async initialize(): Promise<void> {
-    if (this.disabled) return Promise.resolve();
-    if (!this.sqlite3) {
-      try {
-        // Dynamic import to avoid loading native module at startup
-        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-        // @ts-ignore
-        this.sqlite3 = (await import('sqlite3')) as unknown as typeof sqlite3Type;
-      } catch (e) {
-        return Promise.reject(e);
-      }
-    }
-    return new Promise((resolve, reject) => {
-      this.db = new this.sqlite3!.Database(this.dbPath, (err) => {
-        if (err) {
-          reject(err);
-          return;
-        }
-
-        this.createTables()
-          .then(() => resolve())
-          .catch(reject);
-      });
-    });
-  }
-
-  private async createTables(): Promise<void> {
     if (this.disabled) return;
-    if (!this.db) throw new Error('Database not initialized');
 
-    const runAsync = promisify(this.db.run.bind(this.db));
-
-    // Create projects table
-    await runAsync(`
-      CREATE TABLE IF NOT EXISTS projects (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        path TEXT NOT NULL UNIQUE,
-        git_remote TEXT,
-        git_branch TEXT,
-        github_repository TEXT,
-        github_connected BOOLEAN DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-
-    // Create workspaces table
-    await runAsync(`
-      CREATE TABLE IF NOT EXISTS workspaces (
-        id TEXT PRIMARY KEY,
-        project_id TEXT NOT NULL,
-        name TEXT NOT NULL,
-        branch TEXT NOT NULL,
-        path TEXT NOT NULL,
-        status TEXT DEFAULT 'idle',
-        agent_id TEXT,
-        metadata TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE
-      )
-    `);
-
-    try {
-      await runAsync(`ALTER TABLE workspaces ADD COLUMN metadata TEXT`);
-    } catch (error) {
-      if (!(error instanceof Error) || !/duplicate column name/i.test(error.message)) {
-        throw error;
-      }
-    }
-
-    // Create conversations table
-    await runAsync(`
-      CREATE TABLE IF NOT EXISTS conversations (
-        id TEXT PRIMARY KEY,
-        workspace_id TEXT NOT NULL,
-        title TEXT NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (workspace_id) REFERENCES workspaces (id) ON DELETE CASCADE
-      )
-    `);
-
-    // Create messages table
-    await runAsync(`
-      CREATE TABLE IF NOT EXISTS messages (
-        id TEXT PRIMARY KEY,
-        conversation_id TEXT NOT NULL,
-        content TEXT NOT NULL,
-        sender TEXT NOT NULL CHECK (sender IN ('user', 'agent')),
-        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-        metadata TEXT,
-        FOREIGN KEY (conversation_id) REFERENCES conversations (id) ON DELETE CASCADE
-      )
-    `);
-
-    // Create indexes
-    await runAsync(`CREATE INDEX IF NOT EXISTS idx_projects_path ON projects (path)`);
-    await runAsync(
-      `CREATE INDEX IF NOT EXISTS idx_workspaces_project_id ON workspaces (project_id)`
-    );
-    await runAsync(
-      `CREATE INDEX IF NOT EXISTS idx_conversations_workspace_id ON conversations (workspace_id)`
-    );
-    await runAsync(
-      `CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages (conversation_id)`
-    );
-    await runAsync(`CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages (timestamp)`);
+    await this.loadSqliteModule();
+    await this.openConnection();
+    await this.enableForeignKeys();
+    this.initializeOrm();
+    await this.runMigrations();
   }
 
   async saveProject(project: Omit<Project, 'createdAt' | 'updatedAt'>): Promise<void> {
     if (this.disabled) return;
-    if (!this.db) throw new Error('Database not initialized');
+    if (!this.orm) throw new Error('Database not initialized');
 
-    // Important: avoid INSERT OR REPLACE on projects. REPLACE deletes the existing
-    // row to satisfy UNIQUE(path) which can cascade-delete related workspaces
-    // (workspaces.project_id ON DELETE CASCADE). Use an UPSERT on the unique
-    // path constraint that updates fields in-place and preserves the existing id.
-    //
-    // Semantics:
-    // - If no row exists for this path: insert with the provided id.
-    // - If a row exists for this path: update fields; do NOT change id or path.
-    // - created_at remains intact on updates; updated_at is bumped.
-    return new Promise((resolve, reject) => {
-      this.db!.run(
-        `INSERT INTO projects (id, name, path, git_remote, git_branch, github_repository, github_connected, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-         ON CONFLICT(path) DO UPDATE SET
-           name = excluded.name,
-           git_remote = excluded.git_remote,
-           git_branch = excluded.git_branch,
-           github_repository = excluded.github_repository,
-           github_connected = excluded.github_connected,
-           updated_at = CURRENT_TIMESTAMP
-        `,
-        [
-          project.id,
-          project.name,
-          project.path,
-          project.gitInfo.remote || null,
-          project.gitInfo.branch || null,
-          project.githubInfo?.repository || null,
-          project.githubInfo?.connected ? 1 : 0,
-        ],
-        (err) => {
-          if (err) {
-            reject(err);
-          } else {
-            resolve();
-          }
-        }
-      );
-    });
+    await this.orm
+      .insert(projects)
+      .values({
+        id: project.id,
+        name: project.name,
+        path: project.path,
+        gitRemote: project.gitInfo.remote ?? null,
+        gitBranch: project.gitInfo.branch ?? null,
+        githubRepository: project.githubInfo?.repository ?? null,
+        githubConnected: project.githubInfo?.connected ?? false,
+        updatedAt: sql`CURRENT_TIMESTAMP`,
+      })
+      .onConflictDoUpdate({
+        target: projects.path,
+        set: {
+          name: sql`excluded.name`,
+          gitRemote: sql`excluded.git_remote`,
+          gitBranch: sql`excluded.git_branch`,
+          githubRepository: sql`excluded.github_repository`,
+          githubConnected: sql`excluded.github_connected`,
+          updatedAt: sql`CURRENT_TIMESTAMP`,
+        },
+      })
+      .run();
   }
 
   async getProjects(): Promise<Project[]> {
     if (this.disabled) return [];
-    if (!this.db) throw new Error('Database not initialized');
+    if (!this.orm) throw new Error('Database not initialized');
 
-    return new Promise((resolve, reject) => {
-      this.db!.all(
-        `
-        SELECT 
-          id, name, path, git_remote, git_branch, github_repository, github_connected,
-          created_at, updated_at
-        FROM projects 
-        ORDER BY updated_at DESC
-      `,
-        (err, rows: any[]) => {
-          if (err) {
-            reject(err);
-          } else {
-            const projects = rows.map((row) => ({
-              id: row.id,
-              name: row.name,
-              path: row.path,
-              gitInfo: {
-                isGitRepo: !!(row.git_remote || row.git_branch),
-                remote: row.git_remote,
-                branch: row.git_branch,
-              },
-              githubInfo: row.github_repository
-                ? {
-                    repository: row.github_repository,
-                    connected: !!row.github_connected,
-                  }
-                : undefined,
-              createdAt: row.created_at,
-              updatedAt: row.updated_at,
-            }));
-            resolve(projects);
+    const rows = await this.orm
+      .select()
+      .from(projects)
+      .orderBy(desc(projects.updatedAt))
+      .all();
+
+    return rows.map((row: ProjectRow) => ({
+      id: row.id,
+      name: row.name,
+      path: row.path,
+      gitInfo: {
+        isGitRepo: !!(row.gitRemote || row.gitBranch),
+        remote: row.gitRemote ?? undefined,
+        branch: row.gitBranch ?? undefined,
+      },
+      githubInfo: row.githubRepository
+        ? {
+            repository: row.githubRepository,
+            connected: !!row.githubConnected,
           }
-        }
-      );
-    });
+        : undefined,
+      createdAt: row.createdAt ?? '',
+      updatedAt: row.updatedAt ?? '',
+    }));
   }
 
   async saveWorkspace(workspace: Omit<Workspace, 'createdAt' | 'updatedAt'>): Promise<void> {
     if (this.disabled) return;
-    if (!this.db) throw new Error('Database not initialized');
+    if (!this.orm) throw new Error('Database not initialized');
 
-    return new Promise((resolve, reject) => {
-      this.db!.run(
-        `
-        INSERT OR REPLACE INTO workspaces 
-        (id, project_id, name, branch, path, status, agent_id, metadata, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-      `,
-        [
-          workspace.id,
-          workspace.projectId,
-          workspace.name,
-          workspace.branch,
-          workspace.path,
-          workspace.status,
-          workspace.agentId || null,
-          typeof workspace.metadata === 'string'
-            ? workspace.metadata
-            : workspace.metadata
-              ? JSON.stringify(workspace.metadata)
-              : null,
-        ],
-        (err) => {
-          if (err) {
-            reject(err);
-          } else {
-            resolve();
-          }
-        }
-      );
-    });
+    const rawMetadata =
+      typeof workspace.metadata === 'string'
+        ? workspace.metadata
+        : workspace.metadata
+          ? JSON.stringify(workspace.metadata)
+          : null;
+
+    await this.orm
+      .insert(workspaces)
+      .values({
+        id: workspace.id,
+        projectId: workspace.projectId,
+        name: workspace.name,
+        branch: workspace.branch,
+        path: workspace.path,
+        status: workspace.status,
+        agentId: workspace.agentId ?? null,
+        metadata: rawMetadata,
+        updatedAt: sql`CURRENT_TIMESTAMP`,
+      })
+      .onConflictDoUpdate({
+        target: workspaces.id,
+        set: {
+          projectId: sql`excluded.project_id`,
+          name: sql`excluded.name`,
+          branch: sql`excluded.branch`,
+          path: sql`excluded.path`,
+          status: sql`excluded.status`,
+          agentId: sql`excluded.agent_id`,
+          metadata: sql`excluded.metadata`,
+          updatedAt: sql`CURRENT_TIMESTAMP`,
+        },
+      })
+      .run();
   }
 
   async getWorkspaces(projectId?: string): Promise<Workspace[]> {
     if (this.disabled) return [];
-    if (!this.db) throw new Error('Database not initialized');
+    if (!this.orm) throw new Error('Database not initialized');
 
-    let query = `
-      SELECT 
-        id, project_id, name, branch, path, status, agent_id, metadata,
-        created_at, updated_at
-      FROM workspaces
-    `;
-    const params: any[] = [];
-
+    let query = this.orm.select().from(workspaces);
     if (projectId) {
-      query += ' WHERE project_id = ?';
-      params.push(projectId);
+      query = query.where(eq(workspaces.projectId, projectId));
     }
 
-    query += ' ORDER BY updated_at DESC';
+    const rows = await query.orderBy(desc(workspaces.updatedAt)).all();
 
-    return new Promise((resolve, reject) => {
-      this.db!.all(query, params, (err, rows: any[]) => {
-        if (err) {
-          reject(err);
-        } else {
-          const workspaces = rows.map((row) => {
-            let metadata: any = null;
-            if (row.metadata) {
-              try {
-                metadata = JSON.parse(row.metadata);
-              } catch (parseError) {
-                console.warn('Failed to parse workspace metadata for', row.id, parseError);
-                metadata = null;
-              }
-            }
-
-            return {
-              id: row.id,
-              projectId: row.project_id,
-              name: row.name,
-              branch: row.branch,
-              path: row.path,
-              status: row.status,
-              agentId: row.agent_id,
-              metadata,
-              createdAt: row.created_at,
-              updatedAt: row.updated_at,
-            };
-          });
-          resolve(workspaces);
-        }
-      });
-    });
+    return rows.map((row: WorkspaceRow) => ({
+      id: row.id,
+      projectId: row.projectId,
+      name: row.name,
+      branch: row.branch,
+      path: row.path,
+      status: row.status ?? 'idle',
+      agentId: row.agentId ?? undefined,
+      metadata: this.parseMetadata(row.metadata),
+      createdAt: row.createdAt ?? '',
+      updatedAt: row.updatedAt ?? '',
+    }));
   }
 
   async deleteProject(projectId: string): Promise<void> {
     if (this.disabled) return;
-    if (!this.db) throw new Error('Database not initialized');
+    if (!this.orm) throw new Error('Database not initialized');
 
-    return new Promise((resolve, reject) => {
-      this.db!.run('DELETE FROM projects WHERE id = ?', [projectId], (err) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve();
-        }
-      });
-    });
+    await this.orm.delete(projects).where(eq(projects.id, projectId)).run();
   }
 
   async deleteWorkspace(workspaceId: string): Promise<void> {
     if (this.disabled) return;
-    if (!this.db) throw new Error('Database not initialized');
+    if (!this.orm) throw new Error('Database not initialized');
 
-    return new Promise((resolve, reject) => {
-      this.db!.run('DELETE FROM workspaces WHERE id = ?', [workspaceId], (err) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve();
-        }
-      });
-    });
+    await this.orm.delete(workspaces).where(eq(workspaces.id, workspaceId)).run();
   }
 
   // Conversation management methods
   async saveConversation(
     conversation: Omit<Conversation, 'createdAt' | 'updatedAt'>
   ): Promise<void> {
-    if (!this.db) throw new Error('Database not initialized');
+    if (!this.orm) throw new Error('Database not initialized');
 
-    return new Promise((resolve, reject) => {
-      this.db!.run(
-        `
-        INSERT OR REPLACE INTO conversations 
-        (id, workspace_id, title, updated_at)
-        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-      `,
-        [conversation.id, conversation.workspaceId, conversation.title],
-        (err) => {
-          if (err) {
-            reject(err);
-          } else {
-            resolve();
-          }
-        }
-      );
-    });
+    await this.orm
+      .insert(conversations)
+      .values({
+        id: conversation.id,
+        workspaceId: conversation.workspaceId,
+        title: conversation.title,
+        updatedAt: sql`CURRENT_TIMESTAMP`,
+      })
+      .onConflictDoUpdate({
+        target: conversations.id,
+        set: {
+          workspaceId: sql`excluded.workspace_id`,
+          title: sql`excluded.title`,
+          updatedAt: sql`CURRENT_TIMESTAMP`,
+        },
+      })
+      .run();
   }
 
   async getConversations(workspaceId: string): Promise<Conversation[]> {
     if (this.disabled) return [];
-    if (!this.db) throw new Error('Database not initialized');
+    if (!this.orm) throw new Error('Database not initialized');
 
-    return new Promise((resolve, reject) => {
-      this.db!.all(
-        `
-        SELECT * FROM conversations 
-        WHERE workspace_id = ? 
-        ORDER BY updated_at DESC
-      `,
-        [workspaceId],
-        (err, rows: any[]) => {
-          if (err) {
-            reject(err);
-          } else {
-            const conversations = rows.map((row) => ({
-              id: row.id,
-              workspaceId: row.workspace_id,
-              title: row.title,
-              createdAt: row.created_at,
-              updatedAt: row.updated_at,
-            }));
-            resolve(conversations);
-          }
-        }
-      );
-    });
+    const rows = await this.orm
+      .select()
+      .from(conversations)
+      .where(eq(conversations.workspaceId, workspaceId))
+      .orderBy(desc(conversations.updatedAt))
+      .all();
+
+    return rows.map((row: ConversationRow) => ({
+      id: row.id,
+      workspaceId: row.workspaceId,
+      title: row.title,
+      createdAt: row.createdAt ?? '',
+      updatedAt: row.updatedAt ?? '',
+    }));
   }
 
   async getOrCreateDefaultConversation(workspaceId: string): Promise<Conversation> {
@@ -478,142 +318,224 @@ export class DatabaseService {
         updatedAt: new Date().toISOString(),
       };
     }
-    if (!this.db) throw new Error('Database not initialized');
+    if (!this.orm) throw new Error('Database not initialized');
 
-    return new Promise((resolve, reject) => {
-      // First, try to get existing conversations
-      this.db!.all(
-        `
-        SELECT * FROM conversations 
-        WHERE workspace_id = ? 
-        ORDER BY created_at ASC
-        LIMIT 1
-      `,
-        [workspaceId],
-        (err, rows: any[]) => {
-          if (err) {
-            reject(err);
-            return;
-          }
+    const existing = await this.orm
+      .select()
+      .from(conversations)
+      .where(eq(conversations.workspaceId, workspaceId))
+      .orderBy(asc(conversations.createdAt))
+      .limit(1)
+      .get();
 
-          if (rows.length > 0) {
-            // Return existing conversation
-            const row = rows[0];
-            resolve({
-              id: row.id,
-              workspaceId: row.workspace_id,
-              title: row.title,
-              createdAt: row.created_at,
-              updatedAt: row.updated_at,
-            });
-          } else {
-            // Create new default conversation
-            const conversationId = `conv-${workspaceId}-${Date.now()}`;
-            this.db!.run(
-              `
-            INSERT INTO conversations 
-            (id, workspace_id, title, created_at, updated_at)
-            VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-          `,
-              [conversationId, workspaceId, 'Default Conversation'],
-              (err) => {
-                if (err) {
-                  reject(err);
-                } else {
-                  resolve({
-                    id: conversationId,
-                    workspaceId,
-                    title: 'Default Conversation',
-                    createdAt: new Date().toISOString(),
-                    updatedAt: new Date().toISOString(),
-                  });
-                }
-              }
-            );
-          }
-        }
-      );
-    });
+    if (existing) {
+      return {
+        id: existing.id,
+        workspaceId: existing.workspaceId,
+        title: existing.title,
+        createdAt: existing.createdAt ?? '',
+        updatedAt: existing.updatedAt ?? '',
+      };
+    }
+
+    const conversationId = `conv-${workspaceId}-${Date.now()}`;
+
+    await this.orm
+      .insert(conversations)
+      .values({
+        id: conversationId,
+        workspaceId,
+        title: 'Default Conversation',
+        createdAt: sql`CURRENT_TIMESTAMP`,
+        updatedAt: sql`CURRENT_TIMESTAMP`,
+      })
+      .run();
+
+    return {
+      id: conversationId,
+      workspaceId,
+      title: 'Default Conversation',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
   }
 
   // Message management methods
   async saveMessage(message: Omit<Message, 'timestamp'>): Promise<void> {
     if (this.disabled) return;
-    if (!this.db) throw new Error('Database not initialized');
+    if (!this.orm) throw new Error('Database not initialized');
 
-    return new Promise((resolve, reject) => {
-      this.db!.run(
-        `
-        INSERT INTO messages 
-        (id, conversation_id, content, sender, metadata, timestamp)
-        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-      `,
-        [
-          message.id,
-          message.conversationId,
-          message.content,
-          message.sender,
-          message.metadata || null,
-        ],
-        (err) => {
-          if (err) {
-            reject(err);
-          } else {
-            // Update conversation's updated_at timestamp
-            this.db!.run(
-              `
-            UPDATE conversations 
-            SET updated_at = CURRENT_TIMESTAMP 
-            WHERE id = ?
-          `,
-              [message.conversationId],
-              () => {
-                resolve();
-              }
-            );
-          }
-        }
-      );
-    });
+    await this.orm
+      .insert(messages)
+      .values({
+        id: message.id,
+        conversationId: message.conversationId,
+        content: message.content,
+        sender: message.sender,
+        metadata: message.metadata ?? null,
+        timestamp: sql`CURRENT_TIMESTAMP`,
+      })
+      .run();
+
+    await this.orm
+      .update(conversations)
+      .set({ updatedAt: sql`CURRENT_TIMESTAMP` })
+      .where(eq(conversations.id, message.conversationId))
+      .run();
   }
 
   async getMessages(conversationId: string): Promise<Message[]> {
     if (this.disabled) return [];
-    if (!this.db) throw new Error('Database not initialized');
+    if (!this.orm) throw new Error('Database not initialized');
 
-    return new Promise((resolve, reject) => {
-      this.db!.all(
-        `
-        SELECT * FROM messages 
-        WHERE conversation_id = ? 
-        ORDER BY timestamp ASC
-      `,
-        [conversationId],
-        (err, rows: any[]) => {
-          if (err) {
-            reject(err);
-          } else {
-            const messages = rows.map((row) => ({
-              id: row.id,
-              conversationId: row.conversation_id,
-              content: row.content,
-              sender: row.sender as 'user' | 'agent',
-              timestamp: row.timestamp,
-              metadata: row.metadata,
-            }));
-            resolve(messages);
-          }
-        }
-      );
-    });
+    const rows = await this.orm
+      .select()
+      .from(messages)
+      .where(eq(messages.conversationId, conversationId))
+      .orderBy(asc(messages.timestamp))
+      .all();
+
+    return rows.map((row: MessageRow) => ({
+      id: row.id,
+      conversationId: row.conversationId,
+      content: row.content,
+      sender: row.sender,
+      timestamp: row.timestamp ?? new Date().toISOString(),
+      metadata: row.metadata ?? undefined,
+    }));
   }
 
   async deleteConversation(conversationId: string): Promise<void> {
     if (this.disabled) return;
-    if (!this.db) throw new Error('Database not initialized');
+    if (!this.orm) throw new Error('Database not initialized');
 
+    await this.orm.delete(conversations).where(eq(conversations.id, conversationId)).run();
+  }
+
+  async close(): Promise<void> {
+    if (this.disabled || !this.connection) return;
+
+    await new Promise<void>((resolve, reject) => {
+      this.connection!.close((err) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve();
+        }
+      });
+    });
+
+    this.connection = null;
+    this.orm = null;
+  }
+
+  private async loadSqliteModule(): Promise<void> {
+    if (this.sqlite3) return;
+    try {
+      // Dynamic import to avoid eager native module load during startup
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore
+      this.sqlite3 = (await import('sqlite3')) as unknown as typeof sqlite3Type;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  private async openConnection(): Promise<void> {
+    if (!this.sqlite3) throw new Error('sqlite3 module not loaded');
+    if (this.connection) return;
+
+    await new Promise<void>((resolve, reject) => {
+      const db = new this.sqlite3!.Database(this.dbPath, (err) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        this.connection = db;
+        resolve();
+      });
+    });
+  }
+
+  private async enableForeignKeys(): Promise<void> {
+    if (!this.connection) return;
+    await this.runRaw('PRAGMA foreign_keys = ON;');
+  }
+
+  private initializeOrm(): void {
+    if (!this.connection) throw new Error('Database connection not established');
+
+    const { callback, batchCallback } = this.createRemoteCallbacks();
+    this.orm = drizzle(callback, batchCallback, { schema });
+  }
+
+  private createRemoteCallbacks(): {
+    callback: AsyncRemoteCallback;
+    batchCallback: AsyncBatchRemoteCallback;
+  } {
+    const callback: AsyncRemoteCallback = async (query, params, method) => {
+      switch (method) {
+        case 'run':
+          await this.runRaw(query, params);
+          return { rows: [] };
+        case 'get': {
+          const row = await this.getRaw(query, params);
+          return { rows: row };
+        }
+        case 'values': {
+          const rows = await this.allRaw(query, params);
+          return { rows: rows.map((r) => Object.values(r)) };
+        }
+        case 'all':
+        default: {
+          const rows = await this.allRaw(query, params);
+          return { rows };
+        }
+      }
+    };
+
+    const batchCallback: AsyncBatchRemoteCallback = async (batch) => {
+      const results = [];
+      for (const item of batch) {
+        results.push(await callback(item.sql, item.params, item.method));
+      }
+      return results;
+    };
+
+    return { callback, batchCallback };
+  }
+
+  private async runMigrations(): Promise<void> {
+    if (!this.orm) throw new Error('Database not initialized');
+
+    const migrationsFolder = this.getMigrationsFolder();
+    if (!existsSync(migrationsFolder)) {
+      // In development we may not have generated migrations yet.
+      return;
+    }
+
+    await migrate(
+      this.orm,
+      async (queries) => {
+        for (const query of queries) {
+          await this.runRaw(query);
+        }
+      },
+      {
+        migrationsFolder,
+      }
+    );
+  }
+
+  private getMigrationsFolder(): string {
+    const basePath = app.isPackaged ? process.resourcesPath : app.getAppPath();
+    return join(basePath, 'drizzle');
+  }
+
+  private runRaw(query: string, params: unknown[] = []): Promise<void> {
+    if (!this.connection) throw new Error('Database not initialized');
     return new Promise((resolve, reject) => {
-      this.db!.run('DELETE FROM conversations WHERE id = ?', [conversationId], (err) => {
+      this.connection!.run(query, params, (err) => {
         if (err) {
           reject(err);
         } else {
@@ -623,18 +545,40 @@ export class DatabaseService {
     });
   }
 
-  async close(): Promise<void> {
-    if (this.disabled || !this.db) return;
-
+  private allRaw<T = any>(query: string, params: unknown[] = []): Promise<T[]> {
+    if (!this.connection) throw new Error('Database not initialized');
     return new Promise((resolve, reject) => {
-      this.db!.close((err) => {
+      this.connection!.all(query, params, (err, rows) => {
         if (err) {
           reject(err);
         } else {
-          resolve();
+          resolve(rows ?? []);
         }
       });
     });
+  }
+
+  private getRaw<T = any>(query: string, params: unknown[] = []): Promise<T | undefined> {
+    if (!this.connection) throw new Error('Database not initialized');
+    return new Promise((resolve, reject) => {
+      this.connection!.get(query, params, (err, row) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(row ?? undefined);
+        }
+      });
+    });
+  }
+
+  private parseMetadata(value: string | null | undefined): any {
+    if (!value) return null;
+    try {
+      return JSON.parse(value);
+    } catch (error) {
+      console.warn('Failed to parse workspace metadata:', error);
+      return null;
+    }
   }
 }
 

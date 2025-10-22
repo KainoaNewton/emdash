@@ -96,3 +96,10 @@ export type NewConversationRow = typeof conversations.$inferInsert;
 
 export type MessageRow = typeof messages.$inferSelect;
 export type NewMessageRow = typeof messages.$inferInsert;
+
+export const schema = {
+  projects,
+  workspaces,
+  conversations,
+  messages,
+};
