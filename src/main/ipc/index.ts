@@ -18,6 +18,8 @@ import { registerJiraIpc } from './jiraIpc';
 import { registerPlanLockIpc } from '../services/planLockIpc';
 import { registerSettingsIpc } from './settingsIpc';
 import { registerContainerIpc } from './containerIpc';
+import { registerAcpIpc } from './acpIpc';
+import { getMainWindow } from '../app/window';
 
 export function registerAllIpc() {
   // Core app/utility IPC
@@ -44,4 +46,7 @@ export function registerAllIpc() {
   registerConnectionsIpc();
   registerJiraIpc();
   registerPlanLockIpc();
+
+  // ACP integration
+  registerAcpIpc(getMainWindow);
 }

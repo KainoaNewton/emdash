@@ -356,6 +356,37 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on(channel, wrapped);
     return () => ipcRenderer.removeListener(channel, wrapped);
   },
+
+  // ACP integration
+  acpNewSession: (args: {
+    providerId: string;
+    workspaceId: string;
+    cwd: string;
+    spawnOverride?: { command: string; args?: string[] };
+    init?: any;
+  }) => ipcRenderer.invoke('acp:newSession', args),
+  acpPrompt: (args: { sessionId: string; prompt: string }) =>
+    ipcRenderer.invoke('acp:prompt', args),
+  acpCancel: (args: { sessionId: string }) => ipcRenderer.invoke('acp:cancel', args),
+  acpDispose: (args: { sessionId: string }) => ipcRenderer.invoke('acp:dispose', args),
+  onAcpUpdate: (
+    listener: (data: {
+      sessionId: string;
+      type: 'notification' | 'stderr' | 'exit';
+      payload: any;
+    }) => void
+  ) => {
+    const channel = 'acp:update';
+    const wrapped = (_: Electron.IpcRendererEvent, data: any) => listener(data);
+    ipcRenderer.on(channel, wrapped);
+    return () => ipcRenderer.removeListener(channel, wrapped);
+  },
+  onAcpError: (listener: (data: { sessionId?: string; error: string }) => void) => {
+    const channel = 'acp:error';
+    const wrapped = (_: Electron.IpcRendererEvent, data: any) => listener(data);
+    ipcRenderer.on(channel, wrapped);
+    return () => ipcRenderer.removeListener(channel, wrapped);
+  },
 });
 
 // Type definitions for the exposed API
@@ -640,6 +671,29 @@ export interface ElectronAPI {
       conversationId?: string;
     }) => void
   ) => () => void;
+
+  // ACP integration
+  acpNewSession: (args: {
+    providerId: string;
+    workspaceId: string;
+    cwd: string;
+    spawnOverride?: { command: string; args?: string[] };
+    init?: any;
+  }) => Promise<{ success: boolean; sessionId?: string; error?: string }>;
+  acpPrompt: (args: {
+    sessionId: string;
+    prompt: string;
+  }) => Promise<{ success: boolean; result?: any; error?: string }>;
+  acpCancel: (args: { sessionId: string }) => Promise<{ success: boolean; error?: string }>;
+  acpDispose: (args: { sessionId: string }) => Promise<{ success: boolean; error?: string }>;
+  onAcpUpdate: (
+    listener: (data: {
+      sessionId: string;
+      type: 'notification' | 'stderr' | 'exit';
+      payload: any;
+    }) => void
+  ) => () => void;
+  onAcpError: (listener: (data: { sessionId?: string; error: string }) => void) => () => void;
 
   // Generic agent integration
   agentCheckInstallation: (

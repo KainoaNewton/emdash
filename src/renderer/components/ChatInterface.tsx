@@ -23,6 +23,7 @@ import {
   subscribeToWorkspaceRunState,
   type ContainerRunState,
 } from '@/lib/containerRuns';
+import { AcpThreadView } from './acp/AcpThreadView';
 
 declare const window: Window & {
   electronAPI: {
@@ -66,6 +67,9 @@ const ChatInterface: React.FC<Props> = ({ workspace, projectName, className, ini
     getContainerRunState(workspace.id)
   );
   const initializedConversationRef = useRef<string | null>(null);
+  const [acpSessionId, setAcpSessionId] = useState<string | null>(null);
+  const [acpSessionError, setAcpSessionError] = useState<string | null>(null);
+
 
   const codexStream = useCodexStream(
     // Disable Codex chat stream when Codex is terminal-only
@@ -239,6 +243,49 @@ const ChatInterface: React.FC<Props> = ({ workspace, projectName, className, ini
       } catch {}
     })();
   }, [provider, workspace.id]);
+
+  // Create ACP session for ACP-capable providers
+  useEffect(() => {
+    const isAcpCapable = providerMeta[provider]?.acpCapable === true;
+    if (!isAcpCapable) {
+      // Clean up any existing session if switching away from ACP provider
+      if (acpSessionId) {
+        (window as any).electronAPI.acpDispose?.({ sessionId: acpSessionId }).catch(() => {});
+        setAcpSessionId(null);
+      }
+      return;
+    }
+
+    // Create ACP session
+    (async () => {
+      try {
+        setAcpSessionError(null);
+        const result = await (window as any).electronAPI.acpNewSession?.({
+          providerId: provider,
+          workspaceId: workspace.id,
+          cwd: workspace.path,
+        });
+
+        if (result?.success && result.sessionId) {
+          setAcpSessionId(result.sessionId);
+        } else {
+          setAcpSessionError(result?.error || 'Failed to create ACP session');
+          setAcpSessionId(null);
+        }
+      } catch (err: any) {
+        setAcpSessionError(err.message || 'Failed to create ACP session');
+        setAcpSessionId(null);
+      }
+    })();
+
+    // Cleanup on unmount or provider change
+    return () => {
+      if (acpSessionId) {
+        (window as any).electronAPI.acpDispose?.({ sessionId: acpSessionId }).catch(() => {});
+      }
+    };
+  }, [provider, workspace.id, workspace.path]);
+
 
   useEffect(() => {
     if (!codexStream.isReady) return;
@@ -415,6 +462,8 @@ const ChatInterface: React.FC<Props> = ({ workspace, projectName, className, ini
   const providerLocked = lockedProvider !== null;
 
   const isTerminal = providerMeta[provider]?.terminalOnly === true;
+  const isAcpCapable = providerMeta[provider]?.acpCapable === true;
+  const useAcpView = isAcpCapable && isTerminal;
 
   const initialInjection = useMemo(() => {
     if (!isTerminal) return null;
@@ -591,7 +640,39 @@ const ChatInterface: React.FC<Props> = ({ workspace, projectName, className, ini
 
   return (
     <div className={`flex h-full flex-col bg-white dark:bg-gray-800 ${className}`}>
-      {isTerminal ? (
+      {useAcpView ? (
+        // ACP View for ACP-capable providers
+        <div className="flex min-h-0 flex-1 flex-col">
+          {acpSessionError ? (
+            <div className="px-6 pt-4">
+              <div className="mx-auto max-w-4xl">
+                <div className="whitespace-pre-wrap rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-900 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
+                  ACP Session Error: {acpSessionError}
+                  <div className="mt-2 text-xs">
+                    Falling back to terminal view. The provider may not support ACP or is not installed.
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : acpSessionId ? (
+            <div className="flex-1 px-6 pt-4">
+              <div className="mx-auto h-full max-w-4xl">
+                <AcpThreadView
+                  sessionId={acpSessionId}
+                  providerId={provider}
+                  workspaceId={workspace.id}
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="flex h-full items-center justify-center">
+              <div className="text-sm text-gray-500 dark:text-gray-400">
+                Initializing ACP session...
+              </div>
+            </div>
+          )}
+        </div>
+      ) : isTerminal ? (
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="px-6 pt-4">
             <div className="mx-auto max-w-4xl space-y-2">
