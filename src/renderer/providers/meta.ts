@@ -16,6 +16,7 @@ export type ProviderMeta = {
   label: string;
   icon?: string;
   terminalOnly: boolean;
+  acpCapable?: boolean; // supports Agent Client Protocol
   cli?: string;
   helpUrl?: string;
   idlePatterns?: RegExp[];
@@ -73,6 +74,7 @@ export const providerMeta: Record<UiProvider, ProviderMeta> = {
     label: 'Codex',
     icon: '../../assets/images/openai.png',
     terminalOnly: true,
+    acpCapable: true,
     cli: 'codex',
     helpUrl: 'https://developers.openai.com/codex/quickstart',
     idlePatterns: [
@@ -91,6 +93,7 @@ export const providerMeta: Record<UiProvider, ProviderMeta> = {
     label: 'Claude Code',
     icon: '../../assets/images/claude.png',
     terminalOnly: true,
+    acpCapable: true,
     cli: 'claude',
     helpUrl: 'https://docs.claude.com/en/docs/claude-code/quickstart',
     planActivate: '/plan',
@@ -117,6 +120,7 @@ export const providerMeta: Record<UiProvider, ProviderMeta> = {
     label: 'Gemini',
     icon: '../../assets/images/gemini.png',
     terminalOnly: true,
+    acpCapable: true,
     cli: 'gemini',
     helpUrl: 'https://github.com/google-gemini/gemini-cli',
     idlePatterns: [/Ready|Awaiting|Press Enter/i],
