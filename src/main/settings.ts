@@ -7,14 +7,42 @@ export interface RepositorySettings {
   pushOnCreate: boolean; // default true
 }
 
+export interface AcpProviderSettings {
+  path?: string; // Override binary path (e.g., for gemini)
+}
+
+export interface AcpTimeouts {
+  initializeMs: number; // default 15000
+  promptMs: number; // default 600000 (10 minutes)
+}
+
+export interface AcpSettings {
+  enabled: boolean; // Feature flag; default true
+  providers: {
+    gemini: AcpProviderSettings;
+  };
+  timeouts: AcpTimeouts;
+}
+
 export interface AppSettings {
   repository: RepositorySettings;
+  acp: AcpSettings;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
   repository: {
     branchTemplate: 'agent/{slug}-{timestamp}',
     pushOnCreate: true,
+  },
+  acp: {
+    enabled: true,
+    providers: {
+      gemini: {},
+    },
+    timeouts: {
+      initializeMs: 15000,
+      promptMs: 600000,
+    },
   },
 };
 
@@ -90,6 +118,16 @@ function normalizeSettings(input: AppSettings): AppSettings {
       branchTemplate: DEFAULT_SETTINGS.repository.branchTemplate,
       pushOnCreate: DEFAULT_SETTINGS.repository.pushOnCreate,
     },
+    acp: {
+      enabled: DEFAULT_SETTINGS.acp.enabled,
+      providers: {
+        gemini: {},
+      },
+      timeouts: {
+        initializeMs: DEFAULT_SETTINGS.acp.timeouts.initializeMs,
+        promptMs: DEFAULT_SETTINGS.acp.timeouts.promptMs,
+      },
+    },
   };
 
   // Repository
@@ -103,5 +141,21 @@ function normalizeSettings(input: AppSettings): AppSettings {
 
   out.repository.branchTemplate = template;
   out.repository.pushOnCreate = push;
+
+  // ACP
+  const acp = input?.acp ?? DEFAULT_SETTINGS.acp;
+  out.acp.enabled = Boolean(acp?.enabled ?? DEFAULT_SETTINGS.acp.enabled);
+  
+  // ACP providers
+  if (acp?.providers?.gemini?.path) {
+    out.acp.providers.gemini.path = String(acp.providers.gemini.path);
+  }
+
+  // ACP timeouts
+  const initMs = Number(acp?.timeouts?.initializeMs ?? DEFAULT_SETTINGS.acp.timeouts.initializeMs);
+  const promptMs = Number(acp?.timeouts?.promptMs ?? DEFAULT_SETTINGS.acp.timeouts.promptMs);
+  out.acp.timeouts.initializeMs = Math.max(1000, Math.min(60000, initMs)); // 1s to 60s
+  out.acp.timeouts.promptMs = Math.max(10000, Math.min(3600000, promptMs)); // 10s to 1h
+
   return out;
 }
