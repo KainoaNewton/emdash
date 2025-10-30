@@ -18,6 +18,35 @@ import {
   type RunnerMode,
 } from '@shared/container';
 
+const execAsync = promisify(exec);
+
+const LIVE_RELOAD_IGNORED_DIRS = new Set([
+  '.git',
+  '.emdash',
+  'node_modules',
+  'dist',
+  'build',
+  '.next',
+  '.turbo',
+  '.cache',
+]);
+
+const COMPOSE_LIVE_RELOAD_DEBOUNCE_MS = 700;
+
+interface ComposeLiveReloadHandle {
+  dispose(): Promise<void> | void;
+}
+
+interface ComposeLiveReloadOptions {
+  workspaceId: string;
+  workspacePath: string;
+  composeArgsBase: string[];
+  previewService?: string;
+  runId: string;
+  mode: RunnerMode;
+  now: () => number;
+}
+
 import { log } from '../lib/logger';
 import {
   ContainerConfigLoadError,
@@ -82,6 +111,7 @@ export interface ContainerRunnerServiceOptions {
 export class ContainerRunnerService extends EventEmitter {
   private readonly portAllocator: Pick<PortManager, 'allocate'>;
   private readonly startInFlight = new Map<string, Promise<ContainerStartResult>>();
+  private readonly composeLiveReloads = new Map<string, ComposeLiveReloadHandle>();
 
   constructor(options: ContainerRunnerServiceOptions = {}) {
     super();
@@ -112,7 +142,6 @@ export class ContainerRunnerService extends EventEmitter {
     composeFile: string;
   }): Promise<ContainerStartResult> {
     const { workspaceId, workspacePath, runId, mode, config, now, composeFile } = args;
-    const execAsync = promisify(exec);
     const project = `emdash_ws_${workspaceId}`;
 
     const emitLifecycle = (
@@ -220,14 +249,15 @@ export class ContainerRunnerService extends EventEmitter {
       fs.writeFileSync(overrideAbs, this.buildComposeOverrideYaml(allocated), 'utf8');
 
       // Run compose up -d
-      const argsArr: string[] = ['compose'];
+      const composeArgsBase: string[] = ['compose'];
       const envFileAbs = config.envFile ? path.resolve(workspacePath, config.envFile) : null;
-      if (envFileAbs && fs.existsSync(envFileAbs)) argsArr.push('--env-file', envFileAbs);
+      if (envFileAbs && fs.existsSync(envFileAbs)) composeArgsBase.push('--env-file', envFileAbs);
       // Prefer sanitized file when available
       const composePathForUp = fs.existsSync(sanitizedAbs) ? sanitizedAbs : composeFile;
-      argsArr.push('-p', project, '-f', composePathForUp, '-f', overrideAbs, 'up', '-d');
+      composeArgsBase.push('-p', project, '-f', composePathForUp, '-f', overrideAbs);
+      const upArgs = [...composeArgsBase, 'up', '-d'];
       emitLifecycle('starting');
-      const cmd = `docker ${argsArr.map((a) => (a.includes(' ') ? JSON.stringify(a) : a)).join(' ')}`;
+      const cmd = this.buildDockerCommand(upArgs);
       log.info('[containers] compose up cmd', cmd);
       await execAsync(cmd);
 
@@ -247,6 +277,19 @@ export class ContainerRunnerService extends EventEmitter {
       }
       emitPorts(published, previewService);
       emitLifecycle('ready');
+      try {
+        await this.setupComposeLiveReload({
+          workspaceId,
+          workspacePath,
+          composeArgsBase,
+          previewService,
+          runId,
+          mode,
+          now,
+        });
+      } catch (watchErr) {
+        log.warn('[containers] failed to enable compose live reload', watchErr);
+      }
       return { ok: true, runId, config, sourcePath: null };
     } catch (error) {
       log.error('[containers] compose run failed', error);
@@ -254,6 +297,12 @@ export class ContainerRunnerService extends EventEmitter {
       if (serialized.event) this.emitRunnerEvent(serialized.event);
       return { ok: false, error: serialized.error };
     }
+  }
+
+  private buildDockerCommand(args: string[]): string {
+    return `docker ${args
+      .map((a) => (/[\s]/.test(a) ? JSON.stringify(a) : a))
+      .join(' ')}`;
   }
 
   private buildComposeOverrideYaml(
@@ -320,7 +369,6 @@ export class ContainerRunnerService extends EventEmitter {
   }
 
   private async loadComposeConfigJson(composeFile: string, workspacePath: string): Promise<any> {
-    const execAsync = promisify(exec);
     const { stdout } = await execAsync(
       `docker compose -f ${JSON.stringify(composeFile)} config --format json`,
       { cwd: workspacePath }
@@ -361,7 +409,6 @@ export class ContainerRunnerService extends EventEmitter {
     composeFile: string,
     workspacePath: string
   ): Promise<Array<{ service: string; container: number }>> {
-    const execAsync = promisify(exec);
     try {
       const { stdout } = await execAsync(
         `docker compose -f ${JSON.stringify(composeFile)} config --format json`,
@@ -438,7 +485,6 @@ export class ContainerRunnerService extends EventEmitter {
       }
     | { ok: false; error: string }
   > {
-    const execAsync = promisify(exec);
     const project = `emdash_ws_${workspaceId}`;
     try {
       const { stdout } = await execAsync(
@@ -487,6 +533,178 @@ export class ContainerRunnerService extends EventEmitter {
     return ports[0]?.service;
   }
 
+  private async setupComposeLiveReload(options: ComposeLiveReloadOptions): Promise<void> {
+    await this.teardownComposeLiveReload(options.workspaceId);
+    const handle = await this.createComposeLiveReloadHandle(options);
+    if (handle) {
+      this.composeLiveReloads.set(options.workspaceId, handle);
+    }
+  }
+
+  private async createComposeLiveReloadHandle(
+    options: ComposeLiveReloadOptions
+  ): Promise<ComposeLiveReloadHandle | null> {
+    let chokidarModule: any;
+    try {
+      chokidarModule = await import('chokidar');
+    } catch (error) {
+      log.warn('[containers] chokidar not available; compose live reload disabled', error);
+      return null;
+    }
+
+    type MinimalWatcher = {
+      on: (event: string, handler: (...args: any[]) => void) => MinimalWatcher;
+      close: () => Promise<void>;
+    };
+
+    const chokidar = (chokidarModule?.default ?? chokidarModule) as {
+      watch: (paths: string | string[], options?: Record<string, unknown>) => MinimalWatcher;
+    };
+
+    const watcher = chokidar.watch(options.workspacePath, {
+      persistent: true,
+      ignoreInitial: true,
+      awaitWriteFinish: {
+        stabilityThreshold: 250,
+        pollInterval: 100,
+      },
+      ignored: (watchedPath: string) =>
+        this.shouldIgnoreLiveReloadChange(watchedPath, options.workspacePath),
+    });
+
+    const relevantEvents = new Set(['add', 'change', 'unlink', 'addDir', 'unlinkDir']);
+    let disposed = false;
+    let debounceTimer: NodeJS.Timeout | null = null;
+    let rebuildRunning = false;
+    let rebuildRequested = false;
+
+    const scheduleRebuild = (reason: string) => {
+      if (disposed) return;
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+      }
+      debounceTimer = setTimeout(() => {
+        debounceTimer = null;
+        void runRebuild(reason);
+      }, COMPOSE_LIVE_RELOAD_DEBOUNCE_MS);
+    };
+
+    const runRebuild = async (reason: string) => {
+      if (disposed) return;
+      if (rebuildRunning) {
+        rebuildRequested = true;
+        return;
+      }
+      rebuildRunning = true;
+
+      const emitLifecycle = (status: 'building' | 'ready' | 'failed') => {
+        const ts = options.now();
+        this.emitRunnerEvent({
+          ts,
+          workspaceId: options.workspaceId,
+          runId: options.runId,
+          mode: options.mode,
+          type: 'lifecycle',
+          status,
+        });
+      };
+
+      emitLifecycle('building');
+      const args = [...options.composeArgsBase, 'up', '-d', '--build', '--force-recreate'];
+      if (options.previewService) {
+        args.push('--no-deps', options.previewService);
+      }
+
+      const cmd = this.buildDockerCommand(args);
+      log.info('[containers] compose live reload', {
+        workspaceId: options.workspaceId,
+        reason,
+        cmd,
+      });
+
+      try {
+        await execAsync(cmd, { cwd: options.workspacePath });
+        emitLifecycle('ready');
+      } catch (error) {
+        const message =
+          typeof (error as any)?.stderr === 'string' && (error as any).stderr.trim().length > 0
+            ? (error as any).stderr.trim()
+            : error instanceof Error
+              ? error.message
+              : String(error);
+        log.error('[containers] compose live reload failed', error);
+        this.emitRunnerEvent({
+          ts: options.now(),
+          workspaceId: options.workspaceId,
+          runId: options.runId,
+          mode: options.mode,
+          type: 'error',
+          code: 'UNKNOWN',
+          message,
+        });
+        emitLifecycle('ready');
+      } finally {
+        rebuildRunning = false;
+        if (rebuildRequested && !disposed) {
+          rebuildRequested = false;
+          scheduleRebuild('rerun');
+        }
+      }
+    };
+
+    watcher.on('all', (eventName: string, eventPath: string) => {
+      if (!relevantEvents.has(eventName)) return;
+      if (disposed) return;
+      const absolutePath = path.isAbsolute(eventPath)
+        ? eventPath
+        : path.join(options.workspacePath, eventPath);
+      if (this.shouldIgnoreLiveReloadChange(absolutePath, options.workspacePath)) return;
+      scheduleRebuild(eventName);
+    });
+
+    watcher.on('error', (error: unknown) => {
+      log.warn('[containers] compose live reload watcher error', error);
+    });
+
+    return {
+      dispose: async () => {
+        disposed = true;
+        if (debounceTimer) {
+          clearTimeout(debounceTimer);
+          debounceTimer = null;
+        }
+        try {
+          await watcher.close();
+        } catch (error) {
+          log.warn('[containers] failed to close compose live reload watcher', error);
+        }
+      },
+    };
+  }
+
+  private shouldIgnoreLiveReloadChange(filePath: string, workspacePath: string): boolean {
+    const absolutePath = path.isAbsolute(filePath)
+      ? filePath
+      : path.join(workspacePath, filePath);
+    const rel = path.relative(workspacePath, absolutePath);
+    if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) {
+      return true;
+    }
+    const segments = rel.split(path.sep).filter(Boolean);
+    return segments.some((segment) => LIVE_RELOAD_IGNORED_DIRS.has(segment));
+  }
+
+  private async teardownComposeLiveReload(workspaceId: string): Promise<void> {
+    const handle = this.composeLiveReloads.get(workspaceId);
+    if (!handle) return;
+    this.composeLiveReloads.delete(workspaceId);
+    try {
+      await handle.dispose();
+    } catch (error) {
+      log.warn('[containers] failed to dispose compose live reload watcher', error);
+    }
+  }
+
   /**
    * Start a real container run using the local Docker CLI.
    * Emits runner events compatible with the existing renderer.
@@ -516,6 +734,8 @@ export class ContainerRunnerService extends EventEmitter {
       };
     }
 
+    await this.teardownComposeLiveReload(workspaceId);
+
     // Load container config
     const loadResult = await this.loadConfig(workspacePath);
     if (loadResult.ok === false) {
@@ -535,8 +755,6 @@ export class ContainerRunnerService extends EventEmitter {
       // Fallback to mock for host mode until implemented
       return this.startMockRun({ ...options, runId, mode });
     }
-
-    const execAsync = promisify(exec);
 
     const DOCKER_INFO_TIMEOUT_MS = 8000;
     const DOCKER_RUN_TIMEOUT_MS = 2 * 60 * 1000;
@@ -745,7 +963,7 @@ export class ContainerRunnerService extends EventEmitter {
 
       emitLifecycle('starting');
 
-      const cmd = `docker ${dockerArgs.map((a) => (a.includes(' ') ? JSON.stringify(a) : a)).join(' ')}`;
+      const cmd = this.buildDockerCommand(dockerArgs);
       log.info('[containers] docker run cmd', cmd);
       const { stdout } = await execAsync(cmd, { timeout: DOCKER_RUN_TIMEOUT_MS });
       const containerId = (stdout || '').trim();
@@ -792,6 +1010,7 @@ export class ContainerRunnerService extends EventEmitter {
     const runId = this.generateRunId(now);
     const containerName = `emdash_ws_${workspaceId}`;
     try {
+      await this.teardownComposeLiveReload(workspaceId);
       this.emitRunnerEvent({
         ts: now(),
         workspaceId,
@@ -802,11 +1021,11 @@ export class ContainerRunnerService extends EventEmitter {
       });
       // Try compose down first (ignore errors)
       try {
-        await promisify(exec)(`docker compose -p ${JSON.stringify(containerName)} down -v`);
+        await execAsync(this.buildDockerCommand(['compose', '-p', containerName, 'down', '-v']));
       } catch {}
       // Then single-container cleanup (if any)
       try {
-        await promisify(exec)(`docker rm -f ${JSON.stringify(containerName)}`);
+        await execAsync(this.buildDockerCommand(['rm', '-f', containerName]));
       } catch {}
       this.emitRunnerEvent({
         ts: now(),
