@@ -93,13 +93,45 @@ export class ContainerRunnerService extends EventEmitter {
     return this;
   }
 
-  private findComposeFile(workspacePath: string): string | null {
-    const candidates = ['docker-compose.yml', 'docker-compose.yaml', 'compose.yml', 'compose.yaml'];
-    for (const rel of candidates) {
+  private findComposeFiles(workspacePath: string): string[] {
+    const bases = [
+      'docker-compose.yml',
+      'docker-compose.yaml',
+      'compose.yml',
+      'compose.yaml',
+      // common variants found in some repos
+      'docker-compose.build.yml',
+      'docker-compose.build.yaml',
+      'compose.build.yml',
+      'compose.build.yaml',
+      'docker-compose.override.yml',
+      'docker-compose.override.yaml',
+    ];
+    const devs = [
+      'docker-compose.dev.yml',
+      'docker-compose.dev.yaml',
+      'compose.dev.yml',
+      'compose.dev.yaml',
+      // also accept alternate naming used by some repos
+      'docker.compose.dev.yml',
+      'docker.compose.dev.yaml',
+    ];
+    const files: string[] = [];
+    for (const rel of bases) {
       const abs = path.join(workspacePath, rel);
-      if (fs.existsSync(abs)) return abs;
+      if (fs.existsSync(abs)) {
+        files.push(abs);
+        break; // pick first base file
+      }
     }
-    return null;
+    for (const rel of devs) {
+      const abs = path.join(workspacePath, rel);
+      if (fs.existsSync(abs)) {
+        files.push(abs);
+        break; // include one dev file
+      }
+    }
+    return files;
   }
 
   private async startComposeRun(args: {
@@ -109,9 +141,9 @@ export class ContainerRunnerService extends EventEmitter {
     mode: RunnerMode;
     config: ResolvedContainerConfig;
     now: () => number;
-    composeFile: string;
+    composeFiles: string[];
   }): Promise<ContainerStartResult> {
-    const { workspaceId, workspacePath, runId, mode, config, now, composeFile } = args;
+    const { workspaceId, workspacePath, runId, mode, config, now, composeFiles } = args;
     const execAsync = promisify(exec);
     const project = `emdash_ws_${workspaceId}`;
 
@@ -164,7 +196,7 @@ export class ContainerRunnerService extends EventEmitter {
       }
 
       // Always attempt autodiscovery first to avoid introducing unknown services (e.g. default 'app')
-      const discovered = await this.discoverComposePorts(composeFile, workspacePath);
+      const discovered = await this.discoverComposePorts(composeFiles, workspacePath);
       let portRequests: ResolvedContainerPortConfig[] = [];
       if (discovered.length > 0) {
         portRequests = discovered.map((d) => ({
@@ -199,7 +231,7 @@ export class ContainerRunnerService extends EventEmitter {
         fs.mkdirSync(path.dirname(sanitizedAbs), { recursive: true });
       } catch {}
       try {
-        const cfgJson = await this.loadComposeConfigJson(composeFile, workspacePath);
+        const cfgJson = await this.loadComposeConfigJson(composeFiles, workspacePath);
         const portMap = new Map<string, number[]>();
         for (const req of portRequests) {
           const arr = portMap.get(req.service) ?? [];
@@ -223,9 +255,13 @@ export class ContainerRunnerService extends EventEmitter {
       const argsArr: string[] = ['compose'];
       const envFileAbs = config.envFile ? path.resolve(workspacePath, config.envFile) : null;
       if (envFileAbs && fs.existsSync(envFileAbs)) argsArr.push('--env-file', envFileAbs);
-      // Prefer sanitized file when available
-      const composePathForUp = fs.existsSync(sanitizedAbs) ? sanitizedAbs : composeFile;
-      argsArr.push('-p', project, '-f', composePathForUp, '-f', overrideAbs, 'up', '-d');
+      // include user compose files, then sanitized or base, then our override
+      argsArr.push('-p', project);
+      for (const f of composeFiles) {
+        argsArr.push('-f', f);
+      }
+      const composePathForUp = fs.existsSync(sanitizedAbs) ? sanitizedAbs : composeFiles[0];
+      argsArr.push('-f', composePathForUp, '-f', overrideAbs, 'up', '-d');
       emitLifecycle('starting');
       const cmd = `docker ${argsArr.map((a) => (a.includes(' ') ? JSON.stringify(a) : a)).join(' ')}`;
       log.info('[containers] compose up cmd', cmd);
@@ -319,12 +355,14 @@ export class ContainerRunnerService extends EventEmitter {
     return result.length ? result : allocated;
   }
 
-  private async loadComposeConfigJson(composeFile: string, workspacePath: string): Promise<any> {
+  private async loadComposeConfigJson(composeFiles: string[] | string, workspacePath: string): Promise<any> {
     const execAsync = promisify(exec);
-    const { stdout } = await execAsync(
-      `docker compose -f ${JSON.stringify(composeFile)} config --format json`,
-      { cwd: workspacePath }
-    );
+    const files = Array.isArray(composeFiles) ? composeFiles : [composeFiles];
+    const flags = files.flatMap((f) => ['-f', f]);
+    const cmd = `docker compose ${flags
+      .map((a) => (a.includes(' ') ? JSON.stringify(a) : a))
+      .join(' ')} config --format json`;
+    const { stdout } = await execAsync(cmd, { cwd: workspacePath });
     try {
       return JSON.parse(stdout || '{}');
     } catch {
@@ -358,15 +396,17 @@ export class ContainerRunnerService extends EventEmitter {
   }
 
   private async discoverComposePorts(
-    composeFile: string,
+    composeFiles: string[] | string,
     workspacePath: string
   ): Promise<Array<{ service: string; container: number }>> {
     const execAsync = promisify(exec);
     try {
-      const { stdout } = await execAsync(
-        `docker compose -f ${JSON.stringify(composeFile)} config --format json`,
-        { cwd: workspacePath }
-      );
+      const files = Array.isArray(composeFiles) ? composeFiles : [composeFiles];
+      const flags = files.flatMap((f) => ['-f', f]);
+      const cmd = `docker compose ${flags
+        .map((a) => (a.includes(' ') ? JSON.stringify(a) : a))
+        .join(' ')} config --format json`;
+      const { stdout } = await execAsync(cmd, { cwd: workspacePath });
       const cfg = JSON.parse(stdout || '{}');
       const services = cfg?.services || cfg?.Services || {};
       const result: Array<{ service: string; container: number }> = [];
@@ -645,9 +685,9 @@ export class ContainerRunnerService extends EventEmitter {
         };
       }
 
-      // Prefer compose runner when a compose file exists at the workspace root
-      const composeBase = this.findComposeFile(absWorkspace);
-      if (composeBase) {
+      // Prefer compose runner when compose files exist (base and optional dev)
+      const composeFiles = this.findComposeFiles(absWorkspace);
+      if (composeFiles.length > 0) {
         log.info('[containers] compose detected; delegating to compose runner');
         return await this.startComposeRun({
           workspaceId,
@@ -656,7 +696,7 @@ export class ContainerRunnerService extends EventEmitter {
           mode,
           config,
           now,
-          composeFile: composeBase,
+          composeFiles,
         });
       }
 

@@ -15,8 +15,7 @@ import ProjectDeleteButton from './ProjectDeleteButton';
 import { useToast } from '../hooks/use-toast';
 import ContainerStatusBadge from './ContainerStatusBadge';
 import WorkspacePorts from './WorkspacePorts';
-import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from './ui/tooltip';
-import dockerLogo from '../../assets/images/docker.png';
+// Tooltip imports removed; no tooltip used for Connect now
 import {
   getContainerRunState,
   startContainerRun,
@@ -50,13 +49,7 @@ interface Workspace {
   agentId?: string;
 }
 
-function StatusBadge({ status }: { status: Workspace['status'] }) {
-  return (
-    <Badge variant="secondary" className="capitalize">
-      {status}
-    </Badge>
-  );
-}
+// StatusBadge not used; removed
 
 function WorkspaceRow({
   ws,
@@ -84,38 +77,7 @@ function WorkspaceRow({
   const isStartingContainerState = containerStatus === 'building' || containerStatus === 'starting';
   const containerActive = isStartingContainerState || isReady;
   const [expanded, setExpanded] = useState(false);
-  const [hasComposeFile, setHasComposeFile] = useState(false);
-
-  // Check for docker-compose files - if present, disable Connect button
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const api: any = (window as any).electronAPI;
-        const candidates = [
-          'docker-compose.build.yml',
-          'docker-compose.dev.yml',
-          'docker-compose.yml',
-          'docker-compose.yaml',
-          'compose.yml',
-          'compose.yaml',
-        ];
-        for (const file of candidates) {
-          const res = await api?.fsRead?.(ws.path, file, 1);
-          if (!cancelled && res?.success) {
-            setHasComposeFile(true);
-            return;
-          }
-        }
-        if (!cancelled) setHasComposeFile(false);
-      } catch {
-        if (!cancelled) setHasComposeFile(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [ws.path]);
+  // Compose detection previously disabled Connect; now we allow Connect for Compose too.
 
   // Auto-expand when we transition to ready and have ports
   useEffect(() => {
@@ -257,37 +219,16 @@ function WorkspaceRow({
             <ChangesBadge additions={totalAdditions} deletions={totalDeletions} />
           ) : null}
 
-          {hasComposeFile ? (
-            <TooltipProvider delayDuration={200}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    disabled
-                    className="inline-flex h-8 cursor-not-allowed items-center justify-center rounded-md border border-border/70 bg-background px-2.5 text-xs font-medium opacity-50"
-                    aria-label="Connect disabled for Docker Compose projects"
-                  >
-                    <img src={dockerLogo} alt="Docker" className="mr-1.5 h-3.5 w-3.5" />
-                    Connect
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="top" className="max-w-[22rem] text-xs leading-snug">
-                  Docker Compose (multi‑service) containerization is coming soon.
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          ) : (
-            <ContainerStatusBadge
-              active={containerActive}
-              isStarting={isStartingContainerState}
-              isReady={isReady}
-              startingAction={isStartingContainer}
-              stoppingAction={isStoppingContainer}
-              onStart={handleStartContainer}
-              onStop={handleStopContainer}
-              workspacePath={ws.path}
-            />
-          )}
+          <ContainerStatusBadge
+            active={containerActive}
+            isStarting={isStartingContainerState}
+            isReady={isReady}
+            startingAction={isStartingContainer}
+            stoppingAction={isStoppingContainer}
+            onStart={handleStartContainer}
+            onStop={handleStopContainer}
+            workspacePath={ws.path}
+          />
           {containerActive ? (
             <button
               type="button"

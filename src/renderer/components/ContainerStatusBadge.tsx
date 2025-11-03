@@ -65,11 +65,9 @@ export const ContainerStatusBadge: React.FC<Props> = ({
               type="button"
               className="inline-flex h-8 items-center justify-center rounded-md border border-border/70 bg-background px-2.5 text-xs font-medium hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-60"
               onClick={onStart}
-              disabled={startingAction || hasCompose}
+              disabled={startingAction}
               aria-busy={startingAction}
-              aria-label={
-                hasCompose ? 'Compose containerization coming soon' : 'Connect to host machine'
-              }
+              aria-label={hasCompose ? 'Start Docker Compose' : 'Connect to host machine'}
             >
               {startingAction ? (
                 <>
@@ -86,7 +84,7 @@ export const ContainerStatusBadge: React.FC<Props> = ({
           </TooltipTrigger>
           <TooltipContent side="top" className="max-w-[22rem] text-xs leading-snug">
             {hasCompose
-              ? 'Docker Compose (multi‑service) containerization is coming soon.'
+              ? 'Start the Docker Compose stack. Ports are auto-mapped for preview.'
               : 'Connect to host machine. Installs deps and maps declared ports for preview.'}
           </TooltipContent>
         </Tooltip>
