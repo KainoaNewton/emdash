@@ -146,6 +146,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   }) => ipcRenderer.invoke('container:start-run', args),
   stopContainerRun: (workspaceId: string) =>
     ipcRenderer.invoke('container:stop-run', { workspaceId }),
+  checkDockerAvailable: () => ipcRenderer.invoke('container:check-docker'),
   inspectContainerRun: (workspaceId: string) =>
     ipcRenderer.invoke('container:inspect-run', { workspaceId }),
   resolveServiceIcon: (args: { service: string; allowNetwork?: boolean; workspacePath?: string }) =>
@@ -537,6 +538,7 @@ export interface ElectronAPI {
       }
   >;
   stopContainerRun: (workspaceId: string) => Promise<{ ok: boolean; error?: string }>;
+  checkDockerAvailable: () => Promise<{ ok: boolean; error?: string }>;
 
   // GitHub integration
   githubAuth: () => Promise<{ success: boolean; token?: string; user?: any; error?: string }>;

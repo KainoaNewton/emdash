@@ -93,6 +93,17 @@ export class ContainerRunnerService extends EventEmitter {
     return this;
   }
 
+  async checkDockerAvailable(): Promise<{ ok: boolean; error?: string }> {
+    const execAsync = promisify(exec);
+    try {
+      await execAsync("docker info --format '{{.ServerVersion}}'", { timeout: 8000 });
+      return { ok: true };
+    } catch (e: any) {
+      const msg = e?.stderr?.trim?.() || e?.stdout?.trim?.() || e?.message || String(e);
+      return { ok: false, error: msg };
+    }
+  }
+
   private findComposeFiles(workspacePath: string): string[] {
     const bases = [
       'docker-compose.yml',
@@ -255,23 +266,28 @@ export class ContainerRunnerService extends EventEmitter {
       const argsArr: string[] = ['compose'];
       const envFileAbs = config.envFile ? path.resolve(workspacePath, config.envFile) : null;
       if (envFileAbs && fs.existsSync(envFileAbs)) argsArr.push('--env-file', envFileAbs);
-      // include user compose files, then sanitized or base, then our override
+      // include user compose files, then sanitized (when available), then our override
       argsArr.push('-p', project);
       for (const f of composeFiles) {
         argsArr.push('-f', f);
       }
-      const composePathForUp = fs.existsSync(sanitizedAbs) ? sanitizedAbs : composeFiles[0];
-      argsArr.push('-f', composePathForUp, '-f', overrideAbs, 'up', '-d');
+      const hasSanitized = fs.existsSync(sanitizedAbs);
+      if (hasSanitized) {
+        argsArr.push('-f', sanitizedAbs);
+      }
+      argsArr.push('-f', overrideAbs, 'up', '--quiet-pull', '-d');
       emitLifecycle('starting');
       const cmd = `docker ${argsArr.map((a) => (a.includes(' ') ? JSON.stringify(a) : a)).join(' ')}`;
       log.info('[containers] compose up cmd', cmd);
-      await execAsync(cmd);
+      // Compose may emit large pull progress; give it a generous buffer
+      await execAsync(cmd, { maxBuffer: 64 * 1024 * 1024 });
 
       // Discover actual published ports
       let published: Array<{ service: string; container: number; host: number }> = [];
       try {
         const { stdout } = await execAsync(
-          `docker compose -p ${JSON.stringify(project)} ps --format json`
+          `docker compose -p ${JSON.stringify(project)} ps --format json`,
+          { maxBuffer: 8 * 1024 * 1024 }
         );
         published = this.parseComposePs(stdout, allocated);
       } catch {

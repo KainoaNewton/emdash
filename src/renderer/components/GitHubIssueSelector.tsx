@@ -157,13 +157,21 @@ export const GitHubIssueSelector: React.FC<GitHubIssueSelectorProps> = ({
       ? 'Connect your GitHub'
       : 'Select a GitHub issue';
 
-  if (!canListGithub) {
+  // Helper: show only the guidance card when integration unavailable or listing failed
+  if (!canListGithub || issueListError) {
     return (
       <div className={className}>
-        <Input value="" placeholder="GitHub integration unavailable" disabled />
-        <p className="mt-2 text-xs text-muted-foreground">
-          Connect GitHub CLI in Settings to browse issues.
-        </p>
+        <div className="rounded-md border border-border bg-muted/40 p-2">
+          <div className="flex items-center gap-2">
+            <Badge className="inline-flex items-center gap-1.5">
+              <img src={githubLogo} alt="GitHub" className="h-3.5 w-3.5" />
+              <span>Connect GitHub</span>
+            </Badge>
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Sign in with GitHub CLI in Settings to browse and attach issues here.
+          </p>
+        </div>
       </div>
     );
   }
@@ -173,7 +181,7 @@ export const GitHubIssueSelector: React.FC<GitHubIssueSelectorProps> = ({
       <Select
         value={selectedIssue ? `#${selectedIssue.number}` : undefined}
         onValueChange={handleIssueSelect}
-        disabled={disabled || isLoadingIssues || !!issueListError || !issuesLoaded}
+        disabled={disabled || isLoadingIssues || !issuesLoaded}
       >
         <SelectTrigger className="h-9 w-full border-none bg-gray-100 dark:bg-gray-700">
           <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden text-left text-foreground">
@@ -247,19 +255,7 @@ export const GitHubIssueSelector: React.FC<GitHubIssueSelectorProps> = ({
           </div>
         </SelectContent>
       </Select>
-      {issueListError ? (
-        <div className="mt-2 rounded-md border border-border bg-muted/40 p-2">
-          <div className="flex items-center gap-2">
-            <Badge className="inline-flex items-center gap-1.5">
-              <img src={githubLogo} alt="GitHub" className="h-3.5 w-3.5" />
-              <span>Connect GitHub</span>
-            </Badge>
-          </div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Sign in with GitHub CLI in Settings to browse and attach issues here.
-          </p>
-        </div>
-      ) : null}
+      {/* Guidance card handled above when error/integration unavailable */}
       {issueHelperText ? (
         <p className="mt-2 text-xs text-muted-foreground">{issueHelperText}</p>
       ) : null}

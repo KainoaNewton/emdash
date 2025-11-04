@@ -135,6 +135,19 @@ function WorkspaceRow({
   const handleStartContainer = async (e: React.MouseEvent) => {
     e.stopPropagation();
     try {
+      // Preflight: detect if Docker engine is available and provide fast feedback
+      try {
+        const pre = await (window as any).electronAPI?.checkDockerAvailable?.();
+        if (pre && pre.ok === false) {
+          toast({
+            title: 'Docker engine not available',
+            description:
+              'Start Docker Desktop (or Colima) and try again. We use your active Docker context.',
+            variant: 'destructive',
+          });
+          return;
+        }
+      } catch {}
       setIsStartingContainer(true);
       const res = await startContainerRun({
         workspaceId: ws.id,

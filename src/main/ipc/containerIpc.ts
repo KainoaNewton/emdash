@@ -171,6 +171,15 @@ export function registerContainerIpc(): void {
     }
   );
 
+  // Preflight: check if Docker engine is reachable
+  ipcMain.handle('container:check-docker', async () => {
+    try {
+      return await containerRunnerService.checkDockerAvailable();
+    } catch (error: any) {
+      return { ok: false, error: error?.message || String(error) } as const;
+    }
+  });
+
   ipcMain.handle(
     'icons:resolve-service',
     async (_event, args: any): Promise<{ ok: boolean; dataUrl?: string; error?: string }> => {
