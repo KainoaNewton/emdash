@@ -82,10 +82,40 @@ export const ContainerStatusBadge: React.FC<Props> = ({
               )}
             </button>
           </TooltipTrigger>
-          <TooltipContent side="top" className="max-w-[22rem] text-xs leading-snug">
-            {hasCompose
-              ? 'Start the Docker Compose stack. Ports are auto-mapped for preview.'
-              : 'Connect to host machine. Installs deps and maps declared ports for preview.'}
+          <TooltipContent side="top" className="max-w-[26rem] text-xs leading-snug">
+            {hasCompose ? (
+              <div className="space-y-1.5 text-muted-foreground">
+                <p className="font-medium text-foreground">Docker Compose detected</p>
+                <p>
+                  Start the Compose stack. Ports are auto‑mapped for preview. For hot reload, add a
+                  web/app service in your dev compose that mounts the repo and runs your dev
+                  command (e.g., <code className="font-mono">npm run dev</code>).
+                </p>
+                <ul className="list-disc pl-4">
+                  <li>
+                    volumes: <code className="font-mono">.:/app</code> and
+                    <code className="font-mono"> /app/node_modules</code>
+                  </li>
+                  <li>
+                    env: <code className="font-mono">HOST=0.0.0.0</code> (add polling if your
+                    framework needs it)
+                  </li>
+                </ul>
+                <button
+                  type="button"
+                  className="text-primary underline underline-offset-2"
+                  onClick={() =>
+                    (window as any).electronAPI?.openExternal?.(
+                      'https://github.com/generalaction/emdash#compose-dev-mode-hot-reload'
+                    )
+                  }
+                >
+                  Read the guide
+                </button>
+              </div>
+            ) : (
+              'Connect to host machine. Installs deps and maps declared ports for preview.'
+            )}
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>

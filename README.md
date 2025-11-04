@@ -195,3 +195,45 @@ Contributions welcome! See the [Contributing Guide](CONTRIBUTING.md) to get star
 >
 > Emdash itself does **not** send your code or chats to our servers. Third‑party CLIs may transmit data per their policies.
 </details>
+
+
+# Compose Dev Mode (Hot Reload)
+
+Multi‑service projects started via Docker Compose will run and expose ports automatically. To see live UI changes (hot reload), your dev compose must run your app in a development mode and mount your repository into the container.
+
+Quick setup (Node/Next/Vite)
+
+- Add a dev compose file (e.g., `docker-compose.dev.yml`) and include it when starting.
+- In your web/app service:
+  - volumes: `.:/app` and `/app/node_modules` (to avoid host `node_modules`)
+  - command: run your dev server (e.g., `npm run dev` or `pnpm dev`)
+  - env: `HOST=0.0.0.0` (add polling if your framework needs it, e.g., `CHOKIDAR_USEPOLLING=1`)
+  - keep container ports (e.g., `3000:3000`) so discovery works; Emdash re‑maps hosts safely
+
+Example (drop into `docker-compose.dev.yml`):
+
+```yaml
+services:
+  web:
+    image: node:20
+    working_dir: /app
+    command: sh -lc 'corepack enable && (pnpm install --frozen-lockfile || npm ci) && pnpm run dev || npm run dev'
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3000
+      # CHOKIDAR_USEPOLLING: "1"   # uncomment if file watching doesn’t trigger
+    volumes:
+      - .:/app:delegated
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+```
+
+Notes
+
+- Emdash layers files in order: base compose → dev compose → internal overrides (for safe host ports).
+- Infra‑only stacks (DB/cache/object storage) won’t hot‑reload the UI unless you also run your app’s dev server as shown above.
+- Advanced: Docker Compose “develop/watch” can also be used to sync or rebuild on changes.
