@@ -371,7 +371,10 @@ export class ContainerRunnerService extends EventEmitter {
     return result.length ? result : allocated;
   }
 
-  private async loadComposeConfigJson(composeFiles: string[] | string, workspacePath: string): Promise<any> {
+  private async loadComposeConfigJson(
+    composeFiles: string[] | string,
+    workspacePath: string
+  ): Promise<any> {
     const execAsync = promisify(exec);
     const files = Array.isArray(composeFiles) ? composeFiles : [composeFiles];
     const flags = files.flatMap((f) => ['-f', f]);

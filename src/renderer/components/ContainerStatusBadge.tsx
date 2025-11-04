@@ -88,8 +88,8 @@ export const ContainerStatusBadge: React.FC<Props> = ({
                 <p className="font-medium text-foreground">Docker Compose detected</p>
                 <p>
                   Start the Compose stack. Ports are auto‑mapped for preview. For hot reload, add a
-                  web/app service in your dev compose that mounts the repo and runs your dev
-                  command (e.g., <code className="font-mono">npm run dev</code>).
+                  web/app service in your dev compose that mounts the repo and runs your dev command
+                  (e.g., <code className="font-mono">npm run dev</code>).
                 </p>
                 <ul className="list-disc pl-4">
                   <li>
