@@ -139,9 +139,9 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
                       variant="ghost"
                       onClick={onGoHome}
                       aria-label="Home"
-                      className="justify-start"
+                      className="justify-start text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
                     >
-                      <Home className="h-5 w-5 text-gray-600 dark:text-gray-400 sm:h-4 sm:w-4" />
+                      <Home className="h-5 w-5 sm:h-4 sm:w-4" />
                       <span className="hidden text-sm font-medium sm:inline">Home</span>
                     </Button>
                   </SidebarMenuButton>
