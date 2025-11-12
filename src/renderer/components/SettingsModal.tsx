@@ -222,7 +222,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
             transition={
               shouldReduceMotion ? { duration: 0 } : { duration: 0.18, ease: [0.22, 1, 0.36, 1] }
             }
-            className="mx-4 w-full max-w-3xl overflow-hidden rounded-2xl border border-border/50 bg-green-600 shadow-2xl"
+            className="mx-4 w-full max-w-3xl overflow-hidden rounded-2xl border border-border/50 bg-yellow-500 shadow-2xl"
           >
             <div className="flex h-[520px]">
               <aside className="w-60 border-r border-border/60 bg-muted/20 p-6">
