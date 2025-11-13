@@ -27,8 +27,9 @@ function normalizeUrl(u: string): string {
     const re = /(https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]):\d{2,5}(?:\/\S*)?)/i;
     const m = u.match(re);
     if (!m) return '';
-    const url = new URL(m[1].replace('0.0.0.0', 'localhost'));
-    url.hostname = 'localhost';
+    const url = new URL(m[1].replace('0.0.0.0', '127.0.0.1'));
+    // Force IPv4 localhost to avoid ::1/IPv6 mismatch issues on some systems
+    url.hostname = '127.0.0.1';
     return url.toString();
   } catch {
     return '';
@@ -145,6 +146,9 @@ class HostPreviewService extends EventEmitter {
     // Prefer a non-conflicting default dev port (5173) to avoid clashing with the app's own port (often 3000)
     if (!env.PORT) env.PORT = String(5173);
     if (!env.VITE_PORT) env.VITE_PORT = env.PORT;
+    // Bind on IPv4 to avoid ::1 resolution surprises
+    if (!env.HOST) env.HOST = '0.0.0.0';
+    if (!env.VITE_HOST) env.VITE_HOST = env.HOST;
     // Prevent frameworks from auto-opening external browsers
     if (!env.BROWSER) env.BROWSER = 'none';
     try {

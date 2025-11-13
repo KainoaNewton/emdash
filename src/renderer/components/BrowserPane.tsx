@@ -13,7 +13,7 @@ import {
 import { useBrowser } from '@/providers/BrowserProvider';
 import { cn } from '@/lib/utils';
 import { Spinner } from './ui/spinner';
-import { setLastUrl, setRunning } from '@/lib/previewStorage';
+import { setLastUrl, setRunning, isRunning } from '@/lib/previewStorage';
 import { PROBE_TIMEOUT_MS, SPINNER_MAX_MS, isAppPort } from '@/lib/previewNetwork';
 
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
@@ -49,6 +49,8 @@ const BrowserPane: React.FC<{
   }, [widthPct]);
   const [failed, setFailed] = React.useState<boolean>(false);
   const [retryTick, setRetryTick] = React.useState<number>(0);
+  const retryAttemptRef = React.useRef<number>(0);
+  const retryTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const [actionBusy, setActionBusy] = React.useState<null | 'install' | 'start'>(null);
   const [overlayRaised, setOverlayRaised] = React.useState<boolean>(false);
 
@@ -104,6 +106,43 @@ const BrowserPane: React.FC<{
     prevWorkspaceIdRef.current = cur;
   }, [workspaceId]);
 
+  // Bounded auto-retry for preview readiness/dev-server restarts
+  const scheduleAutoRetry = React.useCallback(
+    (reason: 'probe' | 'exit') => {
+      try {
+        const id = (workspaceId || '').trim();
+        const wp = (workspacePath || '').trim();
+        if (!isOpen || !id || !wp) return;
+        const attempt = retryAttemptRef.current;
+        const MAX_AUTO_RETRIES = 3;
+        if (attempt >= MAX_AUTO_RETRIES) return;
+        if (retryTimerRef.current) return; // already scheduled
+        const delayMs = 1000 * Math.pow(2, attempt); // 1s, 2s, 4s
+        retryTimerRef.current = setTimeout(async () => {
+          retryTimerRef.current = null;
+          retryAttemptRef.current = attempt + 1;
+          try {
+            // If we believe the dev server isn't running, ask main to start it again
+            const running = isRunning(id);
+            if (!running) {
+              await (window as any).electronAPI?.hostPreviewStart?.({
+                workspaceId: id,
+                workspacePath: wp,
+              });
+            }
+          } catch {}
+          try {
+            showSpinner();
+            await (window as any).electronAPI?.browserReload?.();
+          } catch {}
+          // Trigger the probe loop again
+          setRetryTick((n) => n + 1);
+        }, delayMs);
+      } catch {}
+    },
+    [isOpen, workspaceId, workspacePath, showSpinner]
+  );
+
   React.useEffect(() => {
     const off = (window as any).electronAPI?.onHostPreviewEvent?.((data: any) => {
       try {
@@ -127,6 +166,14 @@ const BrowserPane: React.FC<{
           }
         }
         if (data.type === 'url' && data.url) {
+          // New URL observed: clear any pending auto-retry attempts
+          try {
+            retryAttemptRef.current = 0;
+            if (retryTimerRef.current) {
+              clearTimeout(retryTimerRef.current);
+              retryTimerRef.current = null;
+            }
+          } catch {}
           setFailed(false);
           const appPort = Number(window.location.port || 0);
           if (isAppPort(String(data.url), appPort)) return;
@@ -142,6 +189,12 @@ const BrowserPane: React.FC<{
             setRunning(String(workspaceId), false);
           } catch {}
           hideSpinner();
+          // If the preview pane is open for this workspace, schedule a limited auto‑restart
+          try {
+            if (isOpen && workspaceId && workspacePath) {
+              scheduleAutoRetry('exit');
+            }
+          } catch {}
         }
       } catch {}
     });
@@ -182,12 +235,26 @@ const BrowserPane: React.FC<{
       if (!cancelled) {
         hideSpinner();
         setFailed(!ok);
+        if (!ok) {
+          // Schedule auto-retry attempts with exponential backoff
+          scheduleAutoRetry('probe');
+        } else {
+          // Success — reset retry attempts
+          try {
+            retryAttemptRef.current = 0;
+            if (retryTimerRef.current) {
+              clearTimeout(retryTimerRef.current);
+              retryTimerRef.current = null;
+            }
+          } catch {}
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
   }, [url, showSpinner, hideSpinner, retryTick]);
+
 
   const handleRetry = React.useCallback(() => {
     if (!url) return;
@@ -320,7 +387,7 @@ const BrowserPane: React.FC<{
     };
     const onPointerMove = (e: PointerEvent) => {
       if (!dragging) return;
-      const dx = startX - e.clientX; // dragging handle to left increases width
+      const dx = startX - e.clientX; 
       const vw = Math.max(1, window.innerWidth);
       const deltaPct = (dx / vw) * 100;
       setWidthPct(clamp(startPct + deltaPct, 5, 96));
