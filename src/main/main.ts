@@ -1,4 +1,5 @@
 import { app } from 'electron';
+const APP_START_TS = Date.now();
 // Ensure PATH matches the user's shell when launched from Finder (macOS)
 // so Homebrew/NPM global binaries like `gh` and `codex` are found.
 try {
@@ -61,6 +62,20 @@ import { registerAllIpc } from './ipc';
 import { databaseService } from './services/DatabaseService';
 import * as telemetry from './telemetry';
 
+// Main-process unhandled error telemetry (best-effort)
+try {
+  process.on('uncaughtException', () => {
+    try {
+      telemetry.capture('error', { type: 'main_uncaught_exception' } as any);
+    } catch {}
+  });
+  process.on('unhandledRejection', () => {
+    try {
+      telemetry.capture('error', { type: 'main_unhandled_rejection' } as any);
+    } catch {}
+  });
+} catch {}
+
 // App bootstrap
 app.whenReady().then(async () => {
   // Initialize database
@@ -99,6 +114,18 @@ app.whenReady().then(async () => {
 
   // Create main window
   createMainWindow();
+  try {
+    const win = require('./app/window');
+    const w = win.getMainWindow?.();
+    w?.once('ready-to-show', () => {
+      try {
+        const now = Date.now();
+        const cold = Math.max(0, now - APP_START_TS);
+        // Approximate first paint as ready-to-show for now
+        telemetry.capture('app_perf' as any, { cold_start_ms: cold, first_paint_ms: cold } as any);
+      } catch {}
+    });
+  } catch {}
 });
 
 // App lifecycle handlers

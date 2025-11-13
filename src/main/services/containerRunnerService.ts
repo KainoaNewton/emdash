@@ -19,6 +19,7 @@ import {
 } from '@shared/container';
 
 import { log } from '../lib/logger';
+import * as telemetry from '../telemetry';
 import {
   ContainerConfigLoadError,
   ContainerConfigLoadResult,
@@ -530,6 +531,13 @@ export class ContainerRunnerService extends EventEmitter {
     const runId = options.runId ?? this.generateRunId(now);
     const mode: RunnerMode = options.mode ?? 'container';
 
+    try {
+      telemetry.capture('container_run_started' as any, { mode } as any);
+      // Record start timestamp per workspace for duration metrics
+      (this as any)._runStartedAt = (this as any)._runStartedAt || new Map<string, number>();
+      (this as any)._runStartedAt.set(options.workspaceId, (options.now ?? Date.now)());
+    } catch {}
+
     // Currently we only implement container mode here.
     if (mode !== 'container') {
       // Fallback to mock for host mode until implemented
@@ -781,6 +789,9 @@ export class ContainerRunnerService extends EventEmitter {
         now,
       });
       if (serialized.event) this.emitRunnerEvent(serialized.event);
+      try {
+        telemetry.capture('container_run_failed' as any, { type: serialized.error.code } as any);
+      } catch {}
       return { ok: false, error: serialized.error };
     }
   }
@@ -816,6 +827,20 @@ export class ContainerRunnerService extends EventEmitter {
         type: 'lifecycle',
         status: 'stopped',
       });
+      try {
+        const startedAtMap: Map<string, number> | undefined = (this as any)._runStartedAt;
+        const started = startedAtMap?.get(workspaceId);
+        if (started) {
+          const duration = Math.max(0, now() - started);
+          telemetry.capture('container_run_completed' as any, {
+            success: true,
+            duration_ms: duration,
+          } as any);
+          startedAtMap?.delete(workspaceId);
+        } else {
+          telemetry.capture('container_run_completed' as any, { success: true } as any);
+        }
+      } catch {}
       return { ok: true } as const;
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
@@ -828,6 +853,20 @@ export class ContainerRunnerService extends EventEmitter {
         code: 'UNKNOWN',
         message,
       });
+      try {
+        const startedAtMap: Map<string, number> | undefined = (this as any)._runStartedAt;
+        const started = startedAtMap?.get(workspaceId);
+        if (started) {
+          const duration = Math.max(0, now() - started);
+          telemetry.capture('container_run_completed' as any, {
+            success: false,
+            duration_ms: duration,
+          } as any);
+          startedAtMap?.delete(workspaceId);
+        } else {
+          telemetry.capture('container_run_completed' as any, { success: false } as any);
+        }
+      } catch {}
       return { ok: false, error: message } as const;
     }
   }

@@ -55,7 +55,36 @@ class SessionRegistry {
       initialSize: options.initialSize,
       scrollbackLines: DEFAULT_SCROLLBACK_LINES,
       theme: options.theme,
-      telemetry: null,
+      telemetry: {
+        track: (event: string, payload?: Record<string, unknown>) => {
+          try {
+            if (event === 'terminal_overflow') {
+              const p = payload || {};
+              const mapped: Record<string, unknown> = {};
+              if (typeof (p as any).bytes === 'number') mapped.bytes = (p as any).bytes;
+              if (typeof (p as any).windowBytes === 'number')
+                mapped.window_bytes = (p as any).windowBytes;
+              if (typeof (p as any).maxWindowBytes === 'number')
+                mapped.max_window_bytes = (p as any).maxWindowBytes;
+              void (window as any).electronAPI?.captureTelemetry?.('terminal_overflow', mapped);
+              return;
+            }
+            if (event === 'terminal_exit') {
+              const p = payload || {};
+              const mapped: Record<string, unknown> = {};
+              if ((p as any).exitCode != null) mapped.exit_code = (p as any).exitCode as any;
+              if ((p as any).signal != null) mapped.signal = (p as any).signal as any;
+              if ((p as any).totalBytes != null) mapped.total_bytes = (p as any).totalBytes as any;
+              void (window as any).electronAPI?.captureTelemetry?.('terminal_exit', mapped);
+              return;
+            }
+            // Fallback: feature tag
+            void (window as any).electronAPI?.captureTelemetry?.('feature_used', {
+              feature: String(event),
+            });
+          } catch {}
+        },
+      },
     };
 
     const session = new TerminalSessionManager(sessionOptions);

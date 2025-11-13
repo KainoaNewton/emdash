@@ -32,6 +32,9 @@ const TelemetryCard: React.FC = () => {
   const onToggle = async (checked: boolean) => {
     setPrefEnabled(checked);
     await window.electronAPI.setTelemetryEnabled(checked);
+    try {
+      await window.electronAPI.captureTelemetry('telemetry_toggled', { enabled: checked });
+    } catch {}
     await refresh();
   };
 

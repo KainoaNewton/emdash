@@ -475,10 +475,13 @@ const AppContent: React.FC = () => {
               });
 
               const saveResult = await window.electronAPI.saveProject(projectWithGithub);
-              if (saveResult.success) {
-                setProjects((prev) => [...prev, projectWithGithub]);
-                activateProjectView(projectWithGithub);
-              } else {
+            if (saveResult.success) {
+              setProjects((prev) => [...prev, projectWithGithub]);
+              activateProjectView(projectWithGithub);
+              try {
+                (window as any).electronAPI?.captureTelemetry?.('project_added');
+              } catch {}
+            } else {
                 const { log } = await import('./lib/logger');
                 log.error('Failed to save project:', saveResult.error);
               }
@@ -508,6 +511,9 @@ const AppContent: React.FC = () => {
             if (saveResult.success) {
               setProjects((prev) => [...prev, projectWithoutGithub]);
               activateProjectView(projectWithoutGithub);
+              try {
+                (window as any).electronAPI?.captureTelemetry?.('project_added');
+              } catch {}
             } else {
               const { log } = await import('./lib/logger');
               log.error('Failed to save project:', saveResult.error);
@@ -727,6 +733,9 @@ const AppContent: React.FC = () => {
           setIsCreatingWorkspace(false);
           return;
         }
+        try {
+          (window as any).electronAPI?.captureTelemetry?.('workspace_created');
+        } catch {}
       } else {
         // Create worktree
         const worktreeResult = await window.electronAPI.worktreeCreate({
@@ -762,6 +771,9 @@ const AppContent: React.FC = () => {
           setIsCreatingWorkspace(false);
           return;
         }
+        try {
+          (window as any).electronAPI?.captureTelemetry?.('workspace_created');
+        } catch {}
       }
 
       {
@@ -1077,6 +1089,9 @@ const AppContent: React.FC = () => {
         title: 'Workspace deleted',
         description: `"${workspace.name}" was removed.`,
       });
+      try {
+        (window as any).electronAPI?.captureTelemetry?.('workspace_deleted');
+      } catch {}
     } catch (error) {
       const { log } = await import('./lib/logger');
       log.error('Failed to delete workspace:', error as any);

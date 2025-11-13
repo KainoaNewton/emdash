@@ -6,6 +6,7 @@ import path from 'path';
 import { app } from 'electron';
 import { databaseService } from './DatabaseService';
 import { log } from '../lib/logger';
+import * as telemetry from '../telemetry';
 
 const execAsync = promisify(exec);
 
@@ -298,6 +299,10 @@ export class CodexService extends EventEmitter {
     }
 
     try {
+      const startedAt = Date.now();
+      try {
+        telemetry.capture('codex_exec_started' as any);
+      } catch {}
       // Spawn codex directly with args to avoid shell quoting issues (backticks, quotes, etc.)
       const args = this.buildCodexExecArgs(message);
       log.info(
@@ -345,6 +350,13 @@ export class CodexService extends EventEmitter {
         log.info(`Codex completed with code ${code} in ${agent.worktreePath}`);
         const exitCode = code !== null && code !== undefined ? code : 'null';
         this.appendStreamLog(workspaceId, `\n[COMPLETE] exit code ${exitCode}\n`);
+        try {
+          const duration = Math.max(0, Date.now() - startedAt);
+          telemetry.capture('codex_exec_completed' as any, {
+            success: code === 0,
+            duration_ms: duration,
+          } as any);
+        } catch {}
         if (!this.pendingCancellationLogs.has(workspaceId)) {
           this.finalizeStreamLog(workspaceId);
         }
@@ -408,6 +420,10 @@ export class CodexService extends EventEmitter {
         conversationId: convId,
       });
       this.activeConversations.delete(workspaceId);
+      try {
+        telemetry.capture('codex_exec_failed' as any, { type: 'stream_error' } as any);
+        telemetry.capture('codex_exec_completed' as any, { success: false } as any);
+      } catch {}
     }
   }
 
@@ -512,6 +528,10 @@ export class CodexService extends EventEmitter {
     agent.lastMessage = message;
 
     try {
+      const startedAt = Date.now();
+      try {
+        telemetry.capture('codex_exec_started' as any);
+      } catch {}
       const args = this.buildCodexExecArgs(message);
       log.info(
         `Executing: codex ${args.map((a) => (a.includes(' ') ? '"' + a + '"' : a)).join(' ')} in ${agent.worktreePath}`
@@ -542,7 +562,10 @@ export class CodexService extends EventEmitter {
       log.info(`Codex completed in ${agent.worktreePath}`);
       log.debug('Codex stdout:', stdout);
       log.debug('Codex stderr:', stderr);
-
+      try {
+        const duration = Math.max(0, Date.now() - startedAt);
+        telemetry.capture('codex_exec_completed' as any, { success: true, duration_ms: duration } as any);
+      } catch {}
       return {
         success: true,
         output: stdout,
@@ -563,6 +586,10 @@ export class CodexService extends EventEmitter {
       }
 
       log.error(`Error executing Codex in ${agent.worktreePath}:`, errorMessage);
+      try {
+        telemetry.capture('codex_exec_failed' as any, { type: 'exec_error' } as any);
+        telemetry.capture('codex_exec_completed' as any, { success: false } as any);
+      } catch {}
 
       return {
         success: false,

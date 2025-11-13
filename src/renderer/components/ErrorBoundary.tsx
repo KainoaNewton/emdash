@@ -25,6 +25,9 @@ export default class ErrorBoundary extends React.Component<ErrorBoundaryProps, E
           log.error('Renderer crash caught by ErrorBoundary', { error, info });
         } catch {}
       });
+      try {
+        (window as any).electronAPI?.captureTelemetry?.('error', { type: 'renderer_crash' });
+      } catch {}
     } catch {}
   }
 

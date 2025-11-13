@@ -1,6 +1,7 @@
 import { ipcMain, app } from 'electron';
 import { log } from '../lib/logger';
 import { GitHubService } from '../services/GitHubService';
+import * as telemetry from '../telemetry';
 import { worktreeService } from '../services/WorktreeService';
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -53,7 +54,11 @@ export function registerGithubIpc() {
 
   ipcMain.handle('github:auth', async () => {
     try {
-      return await githubService.authenticate();
+      const res = await githubService.authenticate();
+      try {
+        if (res?.success) telemetry.capture('github_connected' as any);
+      } catch {}
+      return res;
     } catch (error) {
       log.error('GitHub authentication failed:', error);
       return { success: false, error: 'Authentication failed' };

@@ -33,7 +33,33 @@ type TelemetryEvent =
   // Aggregates (privacy-safe)
   | 'workspace_snapshot'
   // Session summary (duration only)
-  | 'app_session';
+  | 'app_session'
+  // Additional lifecycle/perf
+  | 'app_perf'
+  | 'first_run'
+  | 'app_session_heartbeat'
+  | 'app_first_interaction'
+  // Product events
+  | 'project_added'
+  | 'workspace_created'
+  | 'workspace_deleted'
+  | 'workspace_switched'
+  | 'container_run_started'
+  | 'container_run_completed'
+  | 'container_run_failed'
+  | 'github_connected'
+  | 'pr_list_opened'
+  | 'pr_created'
+  | 'pr_opened'
+  | 'codex_exec_started'
+  | 'codex_exec_completed'
+  | 'codex_exec_failed'
+  | 'command_palette_opened'
+  | 'settings_opened'
+  | 'telemetry_toggled'
+  // Terminal
+  | 'terminal_overflow'
+  | 'terminal_exit';
 
 interface InitOptions {
   installSource?: string;
@@ -46,6 +72,9 @@ let instanceId: string | undefined;
 let installSource: string | undefined;
 let userOptOut: boolean | undefined; // persisted user setting
 let sessionStartMs: number = Date.now();
+let sessionId: string = '';
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+let firstInteractionSent = false;
 
 const libName = 'emdash';
 
@@ -62,7 +91,12 @@ function getInstanceIdPath(): string {
   return join(dir, 'telemetry.json');
 }
 
-function loadOrCreateState(): { instanceId: string; enabledOverride?: boolean } {
+function loadOrCreateState(): {
+  instanceId: string;
+  enabledOverride?: boolean;
+  createdAt?: string;
+  justCreated?: boolean;
+} {
   try {
     const file = getInstanceIdPath();
     if (existsSync(file)) {
@@ -71,7 +105,12 @@ function loadOrCreateState(): { instanceId: string; enabledOverride?: boolean } 
       if (parsed && typeof parsed.instanceId === 'string' && parsed.instanceId.length > 0) {
         const enabledOverride =
           typeof parsed.enabled === 'boolean' ? (parsed.enabled as boolean) : undefined;
-        return { instanceId: parsed.instanceId as string, enabledOverride };
+        return {
+          instanceId: parsed.instanceId as string,
+          enabledOverride,
+          createdAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : undefined,
+          justCreated: false,
+        };
       }
     }
   } catch {
@@ -84,7 +123,7 @@ function loadOrCreateState(): { instanceId: string; enabledOverride?: boolean } 
   } catch {
     // ignore write errors; still use in-memory id
   }
-  return { instanceId: id };
+  return { instanceId: id, justCreated: true };
 }
 
 function cryptoRandomId(): string {
@@ -112,11 +151,14 @@ function getBaseProps() {
   return {
     app_version: getVersionSafe(),
     electron_version: process.versions.electron,
+    node_version: process.versions.node,
+    v8_version: process.versions.v8,
     platform: process.platform,
     arch: process.arch,
     is_dev: !app.isPackaged,
     install_source: installSource ?? (app.isPackaged ? 'dmg' : 'dev'),
     $lib: libName,
+    session_id: sessionId,
   } as const;
 }
 
@@ -128,11 +170,28 @@ function sanitizeEventAndProps(event: TelemetryEvent, props: Record<string, any>
     'type',
     // session
     'session_duration_ms',
+    'first_interaction_ms',
     // aggregates (counts + buckets only)
     'workspace_count',
     'workspace_count_bucket',
     'project_count',
     'project_count_bucket',
+    // perf
+    'cold_start_ms',
+    'first_paint_ms',
+    // container/codex/run props
+    'mode',
+    'success',
+    'duration_ms',
+    // terminal props
+    'bytes',
+    'window_bytes',
+    'max_window_bytes',
+    'exit_code',
+    'signal',
+    'total_bytes',
+    // toggles
+    'enabled',
   ]);
 
   if (props) {
@@ -162,6 +221,16 @@ function sanitizeEventAndProps(event: TelemetryEvent, props: Record<string, any>
     case 'error':
       if (typeof p.type !== 'string') delete p.type;
       break;
+    case 'app_perf': {
+      const cap = (n: any, max = 5 * 60 * 1000) => {
+        const v = clampInt(n, 0, max);
+        return v == null ? undefined : v;
+      };
+      if (p.cold_start_ms != null) p.cold_start_ms = cap(p.cold_start_ms);
+      if (p.first_paint_ms != null) p.first_paint_ms = cap(p.first_paint_ms);
+      for (const k of Object.keys(p)) if (k !== 'cold_start_ms' && k !== 'first_paint_ms') delete p[k];
+      break;
+    }
     case 'app_session':
       // Only duration
       if (p.session_duration_ms != null) {
@@ -171,6 +240,23 @@ function sanitizeEventAndProps(event: TelemetryEvent, props: Record<string, any>
       }
       // strip any other keys
       for (const k of Object.keys(p)) if (k !== 'session_duration_ms') delete p[k];
+      break;
+    case 'app_session_heartbeat': {
+      if (p.session_duration_ms != null) {
+        const v = clampInt(p.session_duration_ms, 0, 1000 * 60 * 60 * 24);
+        if (v == null) delete p.session_duration_ms;
+        else p.session_duration_ms = v;
+      }
+      for (const k of Object.keys(p)) if (k !== 'session_duration_ms') delete p[k];
+      break;
+    }
+    case 'app_first_interaction':
+      if (p.first_interaction_ms != null) {
+        const v = clampInt(p.first_interaction_ms, 0, 1000 * 60 * 60);
+        if (v == null) delete p.first_interaction_ms;
+        else p.first_interaction_ms = v;
+      }
+      for (const k of Object.keys(p)) if (k !== 'first_interaction_ms') delete p[k];
       break;
     case 'workspace_snapshot':
       // Allow only counts and very coarse buckets
@@ -202,6 +288,59 @@ function sanitizeEventAndProps(event: TelemetryEvent, props: Record<string, any>
         }
       }
       break;
+    case 'container_run_started':
+      if (typeof p.mode !== 'string') delete p.mode;
+      for (const k of Object.keys(p)) if (k !== 'mode') delete p[k];
+      break;
+    case 'container_run_completed':
+      if (typeof p.success !== 'boolean') delete p.success;
+      if (p.duration_ms != null) {
+        const v = clampInt(p.duration_ms, 0, 1000 * 60 * 60);
+        if (v == null) delete p.duration_ms;
+        else p.duration_ms = v;
+      }
+      for (const k of Object.keys(p)) if (k !== 'success' && k !== 'duration_ms') delete p[k];
+      break;
+    case 'container_run_failed':
+      if (typeof p.type !== 'string') delete p.type;
+      for (const k of Object.keys(p)) if (k !== 'type') delete p[k];
+      break;
+    case 'codex_exec_started':
+      // no props retained
+      for (const k of Object.keys(p)) delete p[k];
+      break;
+    case 'codex_exec_completed':
+      if (typeof p.success !== 'boolean') delete p.success;
+      if (p.duration_ms != null) {
+        const v = clampInt(p.duration_ms, 0, 1000 * 60 * 60);
+        if (v == null) delete p.duration_ms;
+        else p.duration_ms = v;
+      }
+      for (const k of Object.keys(p)) if (k !== 'success' && k !== 'duration_ms') delete p[k];
+      break;
+    case 'codex_exec_failed':
+      if (typeof p.type !== 'string') delete p.type;
+      for (const k of Object.keys(p)) if (k !== 'type') delete p[k];
+      break;
+    case 'terminal_overflow':
+      if (p.bytes != null) p.bytes = clampInt(p.bytes, 0, 1_000_000_000);
+      if (p.window_bytes != null) p.window_bytes = clampInt(p.window_bytes, 0, 10_000_000_000);
+      if (p.max_window_bytes != null)
+        p.max_window_bytes = clampInt(p.max_window_bytes, 0, 10_000_000_000);
+      for (const k of Object.keys(p))
+        if (k !== 'bytes' && k !== 'window_bytes' && k !== 'max_window_bytes') delete p[k];
+      break;
+    case 'terminal_exit':
+      if (p.exit_code != null) p.exit_code = clampInt(p.exit_code, -1, 10_000);
+      if (p.signal != null) p.signal = clampInt(p.signal, 0, 256);
+      if (p.total_bytes != null) p.total_bytes = clampInt(p.total_bytes, 0, 10_000_000_000);
+      for (const k of Object.keys(p))
+        if (k !== 'exit_code' && k !== 'signal' && k !== 'total_bytes') delete p[k];
+      break;
+    case 'telemetry_toggled':
+      if (typeof p.enabled !== 'boolean') delete p.enabled;
+      for (const k of Object.keys(p)) if (k !== 'enabled') delete p[k];
+      break;
     default:
       // no additional props for lifecycle events
       for (const k of Object.keys(p)) delete p[k];
@@ -226,6 +365,7 @@ async function posthogCapture(
       event,
       properties: {
         distinct_id: instanceId,
+        $ip: '0',
         ...getBaseProps(),
         ...sanitizeEventAndProps(event, properties),
       },
@@ -254,12 +394,27 @@ export function init(options?: InitOptions) {
   const state = loadOrCreateState();
   instanceId = state.instanceId;
   sessionStartMs = Date.now();
+  sessionId = cryptoRandomId();
   // If enabledOverride is explicitly false, user opted out; otherwise leave undefined
   userOptOut =
     typeof state.enabledOverride === 'boolean' ? state.enabledOverride === false : undefined;
 
   // Fire lifecycle start
   void posthogCapture('app_started');
+  if (state.justCreated) {
+    void posthogCapture('first_run');
+  }
+
+  // Heartbeat every 5 minutes to get richer session duration telemetry
+  try {
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    heartbeatTimer = setInterval(() => {
+      try {
+        const dur = Math.max(0, Date.now() - (sessionStartMs || Date.now()));
+        void posthogCapture('app_session_heartbeat', { session_duration_ms: dur });
+      } catch {}
+    }, 5 * 60 * 1000);
+  } catch {}
 }
 
 export function capture(event: TelemetryEvent, properties?: Record<string, any>) {
@@ -273,6 +428,10 @@ export function capture(event: TelemetryEvent, properties?: Record<string, any>)
 
 export function shutdown() {
   // No-op for now (no batching). Left for future posthog-node integration.
+  try {
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  } catch {}
 }
 
 export function isTelemetryEnabled(): boolean {
@@ -308,6 +467,13 @@ export function setTelemetryEnabledViaUser(enabledFlag: boolean) {
   } catch {
     // ignore
   }
+  try {
+    void posthogCapture('telemetry_toggled', { enabled: enabledFlag });
+  } catch {}
+}
+
+export function getSessionElapsedMs(): number {
+  return Math.max(0, Date.now() - (sessionStartMs || Date.now()));
 }
 
 function persistState(state: { instanceId: string; enabledOverride?: boolean }) {

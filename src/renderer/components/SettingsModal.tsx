@@ -64,6 +64,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
   useEffect(() => {
     if (isOpen) {
       setActiveTab('general');
+      try {
+        (window as any).electronAPI?.captureTelemetry?.('settings_opened');
+      } catch {}
     }
   }, [isOpen]);
 

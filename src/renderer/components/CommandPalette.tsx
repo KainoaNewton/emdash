@@ -71,6 +71,11 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({
 }) => {
   const [search, setSearch] = useState('');
   const shouldReduceMotion = useReducedMotion();
+  React.useEffect(() => {
+    try {
+      if (isOpen) (window as any).electronAPI?.captureTelemetry?.('command_palette_opened');
+    } catch {}
+  }, [isOpen]);
 
   const handleClose = useCallback(() => {
     setSearch(''); // Reset search on close

@@ -258,7 +258,28 @@ declare global {
       }>;
       // Telemetry
       captureTelemetry: (
-        event: 'feature_used' | 'error',
+        event:
+          | 'feature_used'
+          | 'error'
+          | 'project_added'
+          | 'workspace_created'
+          | 'workspace_deleted'
+          | 'workspace_switched'
+          | 'container_run_started'
+          | 'container_run_completed'
+          | 'container_run_failed'
+          | 'github_connected'
+          | 'pr_list_opened'
+          | 'pr_created'
+          | 'pr_opened'
+          | 'codex_exec_started'
+          | 'codex_exec_completed'
+          | 'codex_exec_failed'
+          | 'command_palette_opened'
+          | 'settings_opened'
+          | 'terminal_overflow'
+          | 'terminal_exit'
+          | 'telemetry_toggled',
         properties?: Record<string, any>
       ) => Promise<{ success: boolean; disabled?: boolean; error?: string }>;
       getTelemetryStatus: () => Promise<{
@@ -649,7 +670,28 @@ export interface ElectronAPI {
   }>;
   // Telemetry
   captureTelemetry: (
-    event: 'feature_used' | 'error',
+    event:
+      | 'feature_used'
+      | 'error'
+      | 'project_added'
+      | 'workspace_created'
+      | 'workspace_deleted'
+      | 'workspace_switched'
+      | 'container_run_started'
+      | 'container_run_completed'
+      | 'container_run_failed'
+      | 'github_connected'
+      | 'pr_list_opened'
+      | 'pr_created'
+      | 'pr_opened'
+      | 'codex_exec_started'
+      | 'codex_exec_completed'
+      | 'codex_exec_failed'
+      | 'command_palette_opened'
+      | 'settings_opened'
+      | 'terminal_overflow'
+      | 'terminal_exit'
+      | 'telemetry_toggled',
     properties?: Record<string, any>
   ) => Promise<{ success: boolean; disabled?: boolean; error?: string }>;
   getTelemetryStatus: () => Promise<{
