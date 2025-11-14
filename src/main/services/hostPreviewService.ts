@@ -153,6 +153,16 @@ class HostPreviewService extends EventEmitter {
       this.procs.set(workspaceId, child);
       const onData = (buf: Buffer) => {
         const line = buf.toString();
+        // Surface dev server output to the renderer for visibility while starting
+        try {
+          this.emit('event', {
+            type: 'setup',
+            workspaceId,
+            status: 'line',
+            line,
+          } as HostPreviewEvent);
+        } catch {}
+
         const url = normalizeUrl(line);
         if (url) {
           const evt: HostPreviewEvent = { type: 'url', workspaceId, url };

@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron';
+import { ipcMain, BrowserWindow } from 'electron';
 import { browserViewService } from '../services/browserViewService';
 
 export function registerBrowserIpc() {
@@ -38,4 +38,24 @@ export function registerBrowserIpc() {
     browserViewService.reload();
     return { ok: true };
   });
+  ipcMain.handle('browser:view:openDevTools', () => {
+    try {
+      const view = (browserViewService as any).view;
+      if (view?.webContents) {
+        view.webContents.openDevTools();
+      }
+    } catch {}
+    return { ok: true };
+  });
+
+  // Forward browser view events to renderer
+  const forward = (evt: any) => {
+    const all = BrowserWindow.getAllWindows();
+    for (const win of all) {
+      try {
+        win.webContents.send('browser:view:event', evt);
+      } catch {}
+    }
+  };
+  browserViewService.onEvent(forward);
 }

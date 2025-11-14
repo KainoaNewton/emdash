@@ -386,6 +386,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener(channel, wrapped);
   },
 
+  // Lightweight, silent TCP port probe via main process (avoids renderer console noise)
+  netProbePorts: (
+    host: string,
+    ports: number[],
+    timeoutMs?: number
+  ) => ipcRenderer.invoke('net:probe-ports', { host, ports, timeoutMs }),
+
   // Main-managed browser (WebContentsView)
   browserShow: (bounds: { x: number; y: number; width: number; height: number }, url?: string) =>
     ipcRenderer.invoke('browser:view:show', { ...bounds, url }),
@@ -396,6 +403,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   browserGoBack: () => ipcRenderer.invoke('browser:view:goBack'),
   browserGoForward: () => ipcRenderer.invoke('browser:view:goForward'),
   browserReload: () => ipcRenderer.invoke('browser:view:reload'),
+  browserOpenDevTools: () => ipcRenderer.invoke('browser:view:openDevTools'),
+  onBrowserViewEvent: (listener: (data: any) => void) => {
+    const channel = 'browser:view:event';
+    const wrapped = (_: Electron.IpcRendererEvent, data: any) => listener(data);
+    ipcRenderer.on(channel, wrapped);
+    return () => ipcRenderer.removeListener(channel, wrapped);
+  },
 });
 
 // Type definitions for the exposed API
@@ -747,6 +761,13 @@ export interface ElectronAPI {
     listener: (data: { type: 'url'; workspaceId: string; url: string }) => void
   ) => () => void;
 
+  // Lightweight port probe via main process
+  netProbePorts: (
+    host: string,
+    ports: number[],
+    timeoutMs?: number
+  ) => Promise<{ ok: boolean; reachable: number[] }>;
+
   // Main-managed browser (WebContentsView)
   browserShow: (
     bounds: { x: number; y: number; width: number; height: number },
@@ -763,6 +784,15 @@ export interface ElectronAPI {
   browserGoBack: () => Promise<{ ok: boolean }>;
   browserGoForward: () => Promise<{ ok: boolean }>;
   browserReload: () => Promise<{ ok: boolean }>;
+  browserOpenDevTools: () => Promise<{ ok: boolean }>;
+  onBrowserViewEvent: (
+    listener: (data: {
+      type: 'did-finish-load' | 'did-fail-load';
+      url?: string;
+      errorCode?: number;
+      errorDescription?: string;
+    }) => void
+  ) => () => void;
 }
 
 declare global {

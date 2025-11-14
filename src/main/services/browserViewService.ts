@@ -1,7 +1,15 @@
 import { BrowserWindow, WebContentsView, app } from 'electron';
+import { EventEmitter } from 'node:events';
 import { getMainWindow } from '../app/window';
 
-class BrowserViewService {
+export type BrowserViewEvent = {
+  type: 'did-finish-load' | 'did-fail-load';
+  url?: string;
+  errorCode?: number;
+  errorDescription?: string;
+};
+
+class BrowserViewService extends EventEmitter {
   private view: WebContentsView | null = null;
   private visible = false;
 
@@ -19,6 +27,27 @@ class BrowserViewService {
       try {
         this.view.webContents.setWindowOpenHandler?.(() => ({ action: 'deny' }) as any);
       } catch {}
+      
+      // Listen to load events to notify renderer when pages finish loading
+      try {
+        this.view.webContents.on('did-finish-load', () => {
+          try {
+            const url = this.view?.webContents.getURL() || undefined;
+            this.emit('event', { type: 'did-finish-load', url } as BrowserViewEvent);
+          } catch {}
+        });
+        this.view.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+          try {
+            this.emit('event', {
+              type: 'did-fail-load',
+              url: validatedURL,
+              errorCode,
+              errorDescription,
+            } as BrowserViewEvent);
+          } catch {}
+        });
+      } catch {}
+      
       this.visible = true;
     }
     return this.view;
@@ -94,6 +123,11 @@ class BrowserViewService {
 
   isVisible(): boolean {
     return this.visible;
+  }
+
+  onEvent(listener: (evt: BrowserViewEvent) => void): () => void {
+    this.on('event', listener);
+    return () => this.off('event', listener);
   }
 }
 

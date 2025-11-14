@@ -51,6 +51,7 @@ const BrowserPane: React.FC<{
   const [retryTick, setRetryTick] = React.useState<number>(0);
   const [actionBusy, setActionBusy] = React.useState<null | 'install' | 'start'>(null);
   const [overlayRaised, setOverlayRaised] = React.useState<boolean>(false);
+  const [probeKey, setProbeKey] = React.useState<number>(0); // Force readiness probe to run even if URL is same
 
   // Listen for global overlay events (e.g., feedback modal) and hide preview when active
   React.useEffect(() => {
@@ -104,6 +105,39 @@ const BrowserPane: React.FC<{
     prevWorkspaceIdRef.current = cur;
   }, [workspaceId]);
 
+  // Listen to browser view load events to hide spinner when page finishes loading
+  React.useEffect(() => {
+    const off = (window as any).electronAPI?.onBrowserViewEvent?.((data: any) => {
+      try {
+        if (!data) return;
+        if (data.type === 'did-finish-load') {
+          // Page finished loading successfully - hide spinner immediately
+          hideSpinner();
+          setFailed(false);
+        } else if (data.type === 'did-fail-load') {
+          // Page failed to load - check if it's the current URL
+          const failedUrl = data.url;
+          if (failedUrl && url && failedUrl === url) {
+            // Only mark as failed if it's actually the current URL we're trying to load
+            // Some failures might be from redirects or subresources
+            const errorCode = data.errorCode || 0;
+            // Don't mark as failed for certain error codes (like ERR_ABORTED from navigation)
+            if (errorCode !== -3) {
+              // -3 is ERR_ABORTED, which can happen during navigation
+              hideSpinner();
+              setFailed(true);
+            }
+          }
+        }
+      } catch {}
+    });
+    return () => {
+      try {
+        off?.();
+      } catch {}
+    };
+  }, [url, hideSpinner]);
+
   React.useEffect(() => {
     const off = (window as any).electronAPI?.onHostPreviewEvent?.((data: any) => {
       try {
@@ -130,8 +164,9 @@ const BrowserPane: React.FC<{
           setFailed(false);
           const appPort = Number(window.location.port || 0);
           if (isAppPort(String(data.url), appPort)) return;
-          // Mark busy and navigate; a readiness probe below will clear busy when reachable
+          // Mark busy and navigate; browser view events or readiness probe will clear busy when reachable
           showSpinner();
+          setProbeKey((k) => k + 1); // Force readiness probe to run
           navigate(String(data.url));
           try {
             setLastUrl(String(workspaceId), String(data.url));
@@ -152,46 +187,85 @@ const BrowserPane: React.FC<{
     };
   }, [workspaceId, navigate, showSpinner, hideSpinner]);
 
-  // When URL changes, keep spinner until the URL responds at least once
+  // When URL changes, keep spinner until the URL responds at least once OR browser view finishes loading
+  // Use probeKey to force re-run even if URL is the same (e.g., after retry)
   React.useEffect(() => {
     let cancelled = false;
+    const currentProbeKey = probeKey;
     const u = (url || '').trim();
-    if (!u) return;
+    if (!u) {
+      // No URL means we should hide spinner
+      hideSpinner();
+      return;
+    }
+    
+    // Set a timeout safety net - always hide spinner after max time
+    const timeoutId = setTimeout(() => {
+      if (!cancelled && currentProbeKey === probeKey) {
+        hideSpinner();
+        // Don't mark as failed here - browser view might have loaded successfully
+        // even if fetch probe failed (due to CORS, etc.)
+      }
+    }, SPINNER_MAX_MS);
+
     // Kick a lightweight readiness probe to avoid white screen with no feedback
+    // Use main-process TCP probe to avoid noisy fetch errors in the console.
     (async () => {
-      const deadline = Date.now() + SPINNER_MAX_MS; // cap spinner
+      const deadline = Date.now() + SPINNER_MAX_MS;
       const tryOnce = async () => {
         try {
-          const c = new AbortController();
-          const t = setTimeout(() => c.abort(), PROBE_TIMEOUT_MS);
-          await fetch(u, { mode: 'no-cors', signal: c.signal });
-          clearTimeout(t);
-          return true;
+          const parsed = new URL(u);
+          const host = parsed.hostname || 'localhost';
+          const port = Number(parsed.port || 0);
+          if (!port) return false;
+          const res = await (window as any).electronAPI?.netProbePorts?.(host, [port], PROBE_TIMEOUT_MS);
+          return !!(res && Array.isArray(res.reachable) && res.reachable.length > 0);
         } catch {
           return false;
         }
       };
-      // If already busy=false (e.g., manual set), don’t force it back on
-      showSpinner();
+      
+      // Only show spinner if we're the active probe (not cancelled)
+      if (!cancelled && currentProbeKey === probeKey) {
+        showSpinner();
+      }
+      
       let ok = false;
-      while (!cancelled && Date.now() < deadline) {
+      // Try a few times, but don't block forever - browser view events will handle success
+      const maxAttempts = 3;
+      for (let i = 0; i < maxAttempts && !cancelled && Date.now() < deadline && currentProbeKey === probeKey; i++) {
         ok = await tryOnce();
-        if (ok) break;
-        await new Promise((r) => setTimeout(r, 500));
+        if (ok) {
+          // URL is reachable - hide spinner (browser view should load soon)
+          if (!cancelled && currentProbeKey === probeKey) {
+            hideSpinner();
+            setFailed(false);
+            // If we previously attempted to load and it timed out, force a reload now
+            try {
+              (window as any).electronAPI?.browserReload?.();
+            } catch {}
+          }
+          break;
+        }
+        if (i < maxAttempts - 1) {
+          await new Promise((r) => setTimeout(r, 500));
+        }
       }
-      if (!cancelled) {
-        hideSpinner();
-        setFailed(!ok);
-      }
+      
+      // If probe failed but we're still the active probe, don't mark as failed yet
+      // Browser view events will handle the actual load result
     })();
+    
     return () => {
       cancelled = true;
+      clearTimeout(timeoutId);
     };
-  }, [url, showSpinner, hideSpinner, retryTick]);
+  }, [url, showSpinner, hideSpinner, retryTick, probeKey]);
 
   const handleRetry = React.useCallback(() => {
     if (!url) return;
     showSpinner();
+    setProbeKey((k) => k + 1); // Force readiness probe to re-run
     try {
       (window as any).electronAPI?.browserReload?.();
     } catch {}
@@ -245,36 +319,59 @@ const BrowserPane: React.FC<{
   }, []);
 
   React.useEffect(() => {
-    if (!isOpen) {
+    let cancelled = false;
+    const api: any = (window as any).electronAPI;
+    const doHide = () => {
       try {
-        (window as any).electronAPI?.browserHide?.();
+        api?.browserHide?.();
       } catch {}
+    };
+    if (!isOpen) {
+      doHide();
       return;
     }
     if (overlayActive || overlayRaised) {
-      try {
-        (window as any).electronAPI?.browserHide?.();
-      } catch {}
+      doHide();
       return;
     }
     // If no URL yet, keep the native preview view hidden to avoid showing stale content
     if (!url) {
-      try {
-        (window as any).electronAPI?.browserHide?.();
-      } catch {}
+      doHide();
       return;
     }
     const bounds = computeBounds();
-    if (bounds) {
+    if (!bounds) return;
+
+    // Only navigate when we can reach the target port to avoid main-process timeouts
+    (async () => {
       try {
-        (window as any).electronAPI?.browserShow?.(bounds, url || undefined);
-      } catch {}
-    }
+        const parsed = new URL(url);
+        const host = parsed.hostname || 'localhost';
+        const port = Number(parsed.port || 0);
+        let reachable = false;
+        if (port > 0) {
+          const res = await api?.netProbePorts?.(host, [port], PROBE_TIMEOUT_MS);
+          reachable = !!(res && Array.isArray(res.reachable) && res.reachable.length > 0);
+        }
+        if (cancelled) return;
+        if (reachable) {
+          try {
+            api?.browserShow?.(bounds, url);
+          } catch {}
+        } else {
+          // Show view without navigation or keep it hidden; prefer hidden to avoid stale content
+          doHide();
+        }
+      } catch {
+        doHide();
+      }
+    })();
+
     const onResize = () => {
       const b = computeBounds();
       if (b)
         try {
-          (window as any).electronAPI?.browserSetBounds?.(b);
+          api?.browserSetBounds?.(b);
         } catch {}
     };
     window.addEventListener('resize', onResize);
@@ -282,9 +379,8 @@ const BrowserPane: React.FC<{
     const ro = RO ? new RO(() => onResize()) : null;
     if (ro && containerRef.current) ro.observe(containerRef.current);
     return () => {
-      try {
-        (window as any).electronAPI?.browserHide?.();
-      } catch {}
+      cancelled = true;
+      doHide();
       window.removeEventListener('resize', onResize);
       try {
         ro?.disconnect?.();
@@ -481,13 +577,18 @@ const BrowserPane: React.FC<{
           ) : null}
           {busy || !url ? (
             <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
-              <div className="flex items-center gap-3 rounded-xl border border-border/70 bg-background/95 px-4 py-3 text-sm text-muted-foreground shadow-sm backdrop-blur-[1px]">
+              <div className="flex items-start gap-3 rounded-xl border border-border/70 bg-background/95 px-4 py-3 text-sm text-muted-foreground shadow-sm backdrop-blur-[1px]">
                 <Spinner size="md" />
                 <div className="leading-tight">
                   <div className="font-medium text-foreground">Loading preview…</div>
                   <div className="text-xs text-muted-foreground/80">
                     Starting or connecting to your dev server
                   </div>
+                  {lines.length ? (
+                    <div className="mt-1 max-w-[520px] truncate font-mono text-[11px] text-foreground/80">
+                      {lines[lines.length - 1]}
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </div>

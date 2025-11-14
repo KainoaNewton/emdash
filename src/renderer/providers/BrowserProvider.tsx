@@ -33,20 +33,10 @@ export const BrowserProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const ensureRef = () => webviewRef.current as any;
 
   const navigate = React.useCallback((next: string) => {
+    // Only update desired URL here. Actual navigation is coordinated by
+    // BrowserPane effect once the target port is reachable to avoid
+    // main‑process timeouts and noisy errors.
     setUrl(next);
-    try {
-      const api: any = (window as any).electronAPI;
-      if (api && typeof api.browserLoadURL === 'function') {
-        api.browserLoadURL(next);
-        return;
-      }
-    } catch {}
-    const el = ensureRef();
-    try {
-      if (el && el.getURL && el.getURL() !== next) {
-        el.loadURL(next).catch(() => {});
-      }
-    } catch {}
   }, []);
 
   const open = React.useCallback(

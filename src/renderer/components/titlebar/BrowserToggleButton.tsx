@@ -99,7 +99,18 @@ const BrowserToggleButton: React.FC<Props> = ({
         let openedFromLast = false;
         if (last) {
           const portClashesWithApp = isAppPort(last, appPort);
-          const reachable = !portClashesWithApp && (await isReachable(last));
+          let reachable = false;
+          if (!portClashesWithApp) {
+            try {
+              const port = Number(new URL(last).port || 0);
+              if (port > 0) {
+                const res = await (window as any).electronAPI?.netProbePorts?.('localhost', [port], 800);
+                reachable = !!(res && Array.isArray(res.reachable) && res.reachable.length > 0);
+              }
+            } catch {
+              reachable = false;
+            }
+          }
           if (reachable) {
             browser.open(last);
             openedFromLast = true;
@@ -134,19 +145,28 @@ const BrowserToggleButton: React.FC<Props> = ({
             parentProjectPath: (parentProjectPath || '').trim(),
           });
         }
-        // Fallback: if no URL event yet after a short delay, try default dev port once.
+        // Fallback: if no URL event yet after a short delay, poll common dev ports
+        // via a silent TCP probe and only navigate when one is reachable.
         setTimeout(async () => {
+          const preferred = [5173, 3001, 8080, 4200, 5174];
+          const ports = preferred.filter((p) => !isAppPort(`http://localhost:${p}`, appPort));
+          const deadline = Date.now() + SPINNER_MAX_MS;
           try {
-            const candidate = 'http://localhost:5173';
-            // Avoid the app's own port
-            if (isAppPort(candidate, appPort)) return;
-            if (await isReachable(candidate)) {
-              browser.open(candidate);
-              try {
-                setLastUrl(id, candidate);
-                setRunning(id, true);
-              } catch {}
-              browser.hideSpinner();
+            while (Date.now() < deadline) {
+              const res = await (window as any).electronAPI?.netProbePorts?.('localhost', ports, 800);
+              const reachable = Array.isArray(res?.reachable) ? res.reachable : [];
+              if (reachable.length > 0) {
+                const port = reachable[0];
+                const u = `http://localhost:${port}`;
+                browser.open(u);
+                try {
+                  setLastUrl(id, u);
+                  setRunning(id, true);
+                } catch {}
+                browser.hideSpinner();
+                break;
+              }
+              await new Promise((r) => setTimeout(r, 500));
             }
           } catch {}
         }, FALLBACK_DELAY_MS);
