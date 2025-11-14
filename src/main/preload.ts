@@ -396,6 +396,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   browserGoBack: () => ipcRenderer.invoke('browser:view:goBack'),
   browserGoForward: () => ipcRenderer.invoke('browser:view:goForward'),
   browserReload: () => ipcRenderer.invoke('browser:view:reload'),
+  onBrowserNavigation: (listener: (data: {
+    type: 'did-finish-load' | 'did-fail-load' | 'did-start-loading';
+    url?: string;
+    errorCode?: number;
+    errorDescription?: string;
+  }) => void) => {
+    const channel = 'browser:view:navigation';
+    const wrapped = (_: Electron.IpcRendererEvent, data: any) => listener(data);
+    ipcRenderer.on(channel, wrapped);
+    return () => ipcRenderer.removeListener(channel, wrapped);
+  },
 });
 
 // Type definitions for the exposed API
@@ -763,6 +774,14 @@ export interface ElectronAPI {
   browserGoBack: () => Promise<{ ok: boolean }>;
   browserGoForward: () => Promise<{ ok: boolean }>;
   browserReload: () => Promise<{ ok: boolean }>;
+  onBrowserNavigation: (
+    listener: (data: {
+      type: 'did-finish-load' | 'did-fail-load' | 'did-start-loading';
+      url?: string;
+      errorCode?: number;
+      errorDescription?: string;
+    }) => void
+  ) => () => void;
 }
 
 declare global {

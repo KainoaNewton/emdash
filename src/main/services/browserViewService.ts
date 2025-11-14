@@ -4,6 +4,7 @@ import { getMainWindow } from '../app/window';
 class BrowserViewService {
   private view: WebContentsView | null = null;
   private visible = false;
+  private navigationListenersSetup = false;
 
   ensureView(win?: BrowserWindow): WebContentsView | null {
     const w = win || getMainWindow() || undefined;
@@ -19,9 +20,58 @@ class BrowserViewService {
       try {
         this.view.webContents.setWindowOpenHandler?.(() => ({ action: 'deny' }) as any);
       } catch {}
+      this.setupNavigationListeners();
       this.visible = true;
     }
     return this.view;
+  }
+
+  private setupNavigationListeners() {
+    if (!this.view || this.navigationListenersSetup) return;
+    const wc = this.view.webContents;
+    
+    // Emit events when navigation completes successfully
+    wc.on('did-finish-load', () => {
+      try {
+        const win = getMainWindow();
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('browser:view:navigation', {
+            type: 'did-finish-load',
+            url: wc.getURL(),
+          });
+        }
+      } catch {}
+    });
+
+    // Emit events when navigation fails
+    wc.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+      try {
+        const win = getMainWindow();
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('browser:view:navigation', {
+            type: 'did-fail-load',
+            url: validatedURL,
+            errorCode,
+            errorDescription,
+          });
+        }
+      } catch {}
+    });
+
+    // Emit events when navigation starts
+    wc.on('did-start-loading', () => {
+      try {
+        const win = getMainWindow();
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('browser:view:navigation', {
+            type: 'did-start-loading',
+            url: wc.getURL(),
+          });
+        }
+      } catch {}
+    });
+
+    this.navigationListenersSetup = true;
   }
 
   show(bounds: Electron.Rectangle, url?: string) {

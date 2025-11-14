@@ -152,7 +152,41 @@ const BrowserPane: React.FC<{
     };
   }, [workspaceId, navigate, showSpinner, hideSpinner]);
 
+  // Listen to browser navigation events to clear spinner when page loads
+  React.useEffect(() => {
+    const off = (window as any).electronAPI?.onBrowserNavigation?.((data: any) => {
+      try {
+        if (!data || !data.type) return;
+        if (data.type === 'did-finish-load') {
+          // Page loaded successfully - clear spinner and reset failed state
+          hideSpinner();
+          setFailed(false);
+        } else if (data.type === 'did-fail-load') {
+          // Page failed to load - keep spinner for a bit, then show error
+          // Only mark as failed if it's not a navigation error (like ERR_ABORTED from user navigation)
+          const errorCode = data.errorCode || 0;
+          // ERR_ABORTED (-3) usually means navigation was cancelled, don't treat as failure
+          if (errorCode !== -3) {
+            setTimeout(() => {
+              hideSpinner();
+              setFailed(true);
+            }, 1000);
+          }
+        } else if (data.type === 'did-start-loading') {
+          // Navigation started - show spinner
+          showSpinner();
+        }
+      } catch {}
+    });
+    return () => {
+      try {
+        off?.();
+      } catch {}
+    };
+  }, [showSpinner, hideSpinner]);
+
   // When URL changes, keep spinner until the URL responds at least once
+  // This is a fallback in case navigation events don't fire
   React.useEffect(() => {
     let cancelled = false;
     const u = (url || '').trim();
@@ -171,15 +205,26 @@ const BrowserPane: React.FC<{
           return false;
         }
       };
-      // If already busy=false (e.g., manual set), don’t force it back on
-      showSpinner();
+      // Wait a bit to see if navigation event fires first (navigation events are primary)
+      await new Promise((r) => setTimeout(r, 300));
+      if (cancelled) return;
+      // Only probe if spinner is still showing (navigation events should handle it)
+      // This is a fallback for cases where navigation events don't fire
       let ok = false;
-      while (!cancelled && Date.now() < deadline) {
+      while (!cancelled && Date.now() < deadline && busy) {
         ok = await tryOnce();
-        if (ok) break;
+        if (ok) {
+          // If probe succeeds but navigation event didn't fire, clear spinner
+          if (busy) {
+            hideSpinner();
+            setFailed(false);
+          }
+          break;
+        }
         await new Promise((r) => setTimeout(r, 500));
       }
-      if (!cancelled) {
+      // If deadline reached and still busy, navigation events didn't fire - clear spinner
+      if (!cancelled && busy && Date.now() >= deadline) {
         hideSpinner();
         setFailed(!ok);
       }
@@ -187,7 +232,7 @@ const BrowserPane: React.FC<{
     return () => {
       cancelled = true;
     };
-  }, [url, showSpinner, hideSpinner, retryTick]);
+  }, [url, retryTick, busy, hideSpinner]);
 
   const handleRetry = React.useCallback(() => {
     if (!url) return;
