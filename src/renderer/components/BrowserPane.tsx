@@ -286,45 +286,53 @@ const BrowserPane: React.FC<{
       try {
         (window as any).electronAPI?.browserHide?.();
       } catch {}
-      return;
-    }
-    const bounds = computeBounds();
-    // Clear any existing timeouts from previous effect runs
-    timeoutRefsRef.current.forEach(id => clearTimeout(id));
-    timeoutRefsRef.current = [];
-    
-    // Only show browser view if bounds are valid (width and height > 0)
-    if (bounds && bounds.width > 0 && bounds.height > 0) {
-      try {
-        (window as any).electronAPI?.browserShow?.(bounds, url || undefined);
-        // Also ensure URL is loaded if browser view already exists
-        if (url) {
-          (window as any).electronAPI?.browserLoadURL?.(url);
-        }
-      } catch {}
+      // Don't return early - we still need to set up resize listeners for when URL arrives
     } else {
-      // If bounds aren't ready yet, retry multiple times with increasing delays
-      let retryCount = 0;
-      const maxRetries = 10;
-      const retry = () => {
-        retryCount++;
-        const retryBounds = computeBounds();
-        if (retryBounds && retryBounds.width > 0 && retryBounds.height > 0) {
-          try {
-            (window as any).electronAPI?.browserShow?.(retryBounds, url || undefined);
-            if (url) {
-              (window as any).electronAPI?.browserLoadURL?.(url);
-            }
-          } catch {}
-        } else if (retryCount < maxRetries) {
-          // Retry with exponential backoff: 50ms, 100ms, 200ms, etc., capped at 500ms
-          const delay = Math.min(50 * Math.pow(2, retryCount - 1), 500);
-          const id = setTimeout(retry, delay);
-          timeoutRefsRef.current.push(id);
+      // We have a URL - show the browser view
+      const bounds = computeBounds();
+      // Clear any existing timeouts from previous effect runs
+      timeoutRefsRef.current.forEach(id => clearTimeout(id));
+      timeoutRefsRef.current = [];
+      
+      // Only show browser view if bounds are valid (width and height > 0)
+      if (bounds && bounds.width > 0 && bounds.height > 0) {
+        try {
+          (window as any).electronAPI?.browserShow?.(bounds, url || undefined);
+          // Also ensure URL is loaded if browser view already exists
+          if (url) {
+            (window as any).electronAPI?.browserLoadURL?.(url);
+          }
+        } catch (err) {
+          console.error('[BrowserPane] Failed to show browser view:', err);
         }
-      };
-      const id = setTimeout(retry, 50);
-      timeoutRefsRef.current.push(id);
+      } else {
+        // If bounds aren't ready yet, retry multiple times with increasing delays
+        let retryCount = 0;
+        const maxRetries = 10;
+        const retry = () => {
+          retryCount++;
+          const retryBounds = computeBounds();
+          if (retryBounds && retryBounds.width > 0 && retryBounds.height > 0) {
+            try {
+              (window as any).electronAPI?.browserShow?.(retryBounds, url || undefined);
+              if (url) {
+                (window as any).electronAPI?.browserLoadURL?.(url);
+              }
+            } catch (err) {
+              console.error('[BrowserPane] Failed to show browser view on retry:', err);
+            }
+          } else if (retryCount < maxRetries) {
+            // Retry with exponential backoff: 50ms, 100ms, 200ms, etc., capped at 500ms
+            const delay = Math.min(50 * Math.pow(2, retryCount - 1), 500);
+            const id = setTimeout(retry, delay);
+            timeoutRefsRef.current.push(id);
+          } else {
+            console.warn('[BrowserPane] Failed to get valid bounds after', maxRetries, 'retries');
+          }
+        };
+        const id = setTimeout(retry, 50);
+        timeoutRefsRef.current.push(id);
+      }
     }
     
     const onResize = () => {
@@ -413,6 +421,21 @@ const BrowserPane: React.FC<{
   }, [setWidthPct]);
 
   const { goBack, goForward, reload } = useBrowser();
+
+  // Debug: log when pane state changes
+  React.useEffect(() => {
+    if (isOpen) {
+      const bounds = computeBounds();
+      console.log('[BrowserPane] Pane opened', { 
+        url, 
+        busy, 
+        isOpen, 
+        bounds,
+        containerRef: containerRef.current ? 'exists' : 'missing',
+        containerRect: containerRef.current?.getBoundingClientRect()
+      });
+    }
+  }, [isOpen, url, busy, computeBounds]);
 
   return (
     <div
@@ -534,7 +557,7 @@ const BrowserPane: React.FC<{
             id="emdash-browser-drag"
             className="absolute left-0 top-0 z-[200] h-full w-[6px] cursor-col-resize hover:bg-border/60"
           />
-          <div ref={containerRef} className="h-full w-full" />
+          <div ref={containerRef} className="h-full w-full min-h-[200px]" />
           {dragging ? (
             <div
               className="absolute inset-0 z-[180] cursor-col-resize"
