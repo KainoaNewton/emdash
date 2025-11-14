@@ -105,9 +105,18 @@ const BrowserPane: React.FC<{
   }, [workspaceId]);
 
   React.useEffect(() => {
+    console.log('[BrowserPane] Setting up hostPreviewEvent listener', { workspaceId });
     const off = (window as any).electronAPI?.onHostPreviewEvent?.((data: any) => {
+      console.log('[BrowserPane] Received hostPreviewEvent:', data);
       try {
-        if (!data || !workspaceId || data.workspaceId !== workspaceId) return;
+        if (!data || !workspaceId || data.workspaceId !== workspaceId) {
+          console.log('[BrowserPane] Event filtered out', { 
+            hasData: !!data, 
+            eventWorkspaceId: data?.workspaceId, 
+            currentWorkspaceId: workspaceId 
+          });
+          return;
+        }
         if (data.type === 'setup') {
           if (data.status === 'line' && data.line) {
             setLines((prev) => {
@@ -127,10 +136,15 @@ const BrowserPane: React.FC<{
           }
         }
         if (data.type === 'url' && data.url) {
+          console.log('[BrowserPane] Received URL event:', data);
           setFailed(false);
           const appPort = Number(window.location.port || 0);
-          if (isAppPort(String(data.url), appPort)) return;
+          if (isAppPort(String(data.url), appPort)) {
+            console.log('[BrowserPane] URL port clashes with app port, ignoring');
+            return;
+          }
           // Mark busy and navigate; a readiness probe below will clear busy when reachable
+          console.log('[BrowserPane] Navigating to URL:', data.url);
           showSpinner();
           navigate(String(data.url));
           try {
