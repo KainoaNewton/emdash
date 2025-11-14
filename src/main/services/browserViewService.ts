@@ -4,6 +4,7 @@ import { getMainWindow } from '../app/window';
 class BrowserViewService {
   private view: WebContentsView | null = null;
   private visible = false;
+  private eventListenersAttached = false;
 
   ensureView(win?: BrowserWindow): WebContentsView | null {
     const w = win || getMainWindow() || undefined;
@@ -19,9 +20,47 @@ class BrowserViewService {
       try {
         this.view.webContents.setWindowOpenHandler?.(() => ({ action: 'deny' }) as any);
       } catch {}
+      this.attachEventListeners();
       this.visible = true;
     }
     return this.view;
+  }
+
+  private attachEventListeners() {
+    if (this.eventListenersAttached || !this.view) return;
+    this.eventListenersAttached = true;
+    const wc = this.view.webContents;
+    const mainWindow = getMainWindow();
+    if (!mainWindow) return;
+
+    // Notify renderer when page finishes loading successfully
+    wc.on('did-finish-load', () => {
+      try {
+        mainWindow.webContents.send('browser:view:did-finish-load', {
+          url: wc.getURL(),
+        });
+      } catch {}
+    });
+
+    // Notify renderer when page fails to load
+    wc.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+      try {
+        mainWindow.webContents.send('browser:view:did-fail-load', {
+          url: validatedURL,
+          errorCode,
+          errorDescription,
+        });
+      } catch {}
+    });
+
+    // Notify renderer when navigation starts
+    wc.on('did-start-loading', () => {
+      try {
+        mainWindow.webContents.send('browser:view:did-start-loading', {
+          url: wc.getURL(),
+        });
+      } catch {}
+    });
   }
 
   show(bounds: Electron.Rectangle, url?: string) {
@@ -89,6 +128,12 @@ class BrowserViewService {
   reload() {
     try {
       this.view?.webContents.reload();
+    } catch {}
+  }
+
+  openDevTools() {
+    try {
+      this.view?.webContents.openDevTools();
     } catch {}
   }
 

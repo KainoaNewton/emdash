@@ -34,6 +34,8 @@ export const BrowserProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const navigate = React.useCallback((next: string) => {
     setUrl(next);
+    // Show spinner when navigation starts
+    setBusyState(true);
     try {
       const api: any = (window as any).electronAPI;
       if (api && typeof api.browserLoadURL === 'function') {

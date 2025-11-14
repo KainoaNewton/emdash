@@ -396,6 +396,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
   browserGoBack: () => ipcRenderer.invoke('browser:view:goBack'),
   browserGoForward: () => ipcRenderer.invoke('browser:view:goForward'),
   browserReload: () => ipcRenderer.invoke('browser:view:reload'),
+  browserOpenDevTools: () => ipcRenderer.invoke('browser:view:openDevTools'),
+  onBrowserViewEvent: (listener: (data: { type: string; url?: string; errorCode?: number; errorDescription?: string }) => void) => {
+    const handlers: Array<() => void> = [];
+    const didFinishLoad = (_: Electron.IpcRendererEvent, data: any) => listener({ type: 'did-finish-load', ...data });
+    const didFailLoad = (_: Electron.IpcRendererEvent, data: any) => listener({ type: 'did-fail-load', ...data });
+    const didStartLoading = (_: Electron.IpcRendererEvent, data: any) => listener({ type: 'did-start-loading', ...data });
+    ipcRenderer.on('browser:view:did-finish-load', didFinishLoad);
+    ipcRenderer.on('browser:view:did-fail-load', didFailLoad);
+    ipcRenderer.on('browser:view:did-start-loading', didStartLoading);
+    handlers.push(
+      () => ipcRenderer.removeListener('browser:view:did-finish-load', didFinishLoad),
+      () => ipcRenderer.removeListener('browser:view:did-fail-load', didFailLoad),
+      () => ipcRenderer.removeListener('browser:view:did-start-loading', didStartLoading)
+    );
+    return () => handlers.forEach(h => h());
+  },
 });
 
 // Type definitions for the exposed API
@@ -763,6 +779,10 @@ export interface ElectronAPI {
   browserGoBack: () => Promise<{ ok: boolean }>;
   browserGoForward: () => Promise<{ ok: boolean }>;
   browserReload: () => Promise<{ ok: boolean }>;
+  browserOpenDevTools: () => Promise<{ ok: boolean }>;
+  onBrowserViewEvent: (
+    listener: (data: { type: string; url?: string; errorCode?: number; errorDescription?: string }) => void
+  ) => () => void;
 }
 
 declare global {

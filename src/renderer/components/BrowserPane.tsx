@@ -152,7 +152,58 @@ const BrowserPane: React.FC<{
     };
   }, [workspaceId, navigate, showSpinner, hideSpinner]);
 
-  // When URL changes, keep spinner until the URL responds at least once
+  // Listen to browser view events to control spinner state (primary mechanism)
+  React.useEffect(() => {
+    const off = (window as any).electronAPI?.onBrowserViewEvent?.((data: any) => {
+      try {
+        if (!data || !data.type) return;
+        const currentUrl = (url || '').trim();
+        const eventUrl = (data.url || '').trim();
+        
+        // Normalize URLs for comparison (remove trailing slashes, handle http vs https)
+        const normalizeUrl = (u: string) => {
+          try {
+            const parsed = new URL(u);
+            return `${parsed.protocol}//${parsed.host}${parsed.pathname.replace(/\/$/, '')}${parsed.search}${parsed.hash}`;
+          } catch {
+            return u.replace(/\/$/, '');
+          }
+        };
+        
+        // Only handle events for the current URL (allow some flexibility for redirects)
+        if (currentUrl && eventUrl) {
+          const normalizedCurrent = normalizeUrl(currentUrl);
+          const normalizedEvent = normalizeUrl(eventUrl);
+          // Allow events if URLs match or if event URL starts with current URL (for redirects)
+          if (normalizedCurrent !== normalizedEvent && !normalizedEvent.startsWith(normalizedCurrent.split('?')[0])) {
+            return;
+          }
+        }
+        
+        if (data.type === 'did-finish-load') {
+          // Page loaded successfully - hide spinner and clear failed state
+          hideSpinner();
+          setFailed(false);
+        } else if (data.type === 'did-fail-load') {
+          // Page failed to load - hide spinner and show failed state
+          hideSpinner();
+          setFailed(true);
+        } else if (data.type === 'did-start-loading') {
+          // Navigation started - show spinner
+          showSpinner();
+          setFailed(false);
+        }
+      } catch {}
+    });
+    return () => {
+      try {
+        off?.();
+      } catch {}
+    };
+  }, [url, showSpinner, hideSpinner]);
+
+  // Fallback readiness probe: if webContents events don't fire (e.g., network error before load),
+  // use a timeout-based approach with a shorter deadline
   React.useEffect(() => {
     let cancelled = false;
     const u = (url || '').trim();
@@ -186,8 +237,9 @@ const BrowserPane: React.FC<{
     })();
     return () => {
       cancelled = true;
+      clearTimeout(fallbackTimeout);
     };
-  }, [url, showSpinner, hideSpinner, retryTick]);
+  }, [url, busy, hideSpinner, retryTick]);
 
   const handleRetry = React.useCallback(() => {
     if (!url) return;
@@ -267,6 +319,8 @@ const BrowserPane: React.FC<{
     const bounds = computeBounds();
     if (bounds) {
       try {
+        // Show spinner when starting navigation
+        showSpinner();
         (window as any).electronAPI?.browserShow?.(bounds, url || undefined);
       } catch {}
     }
