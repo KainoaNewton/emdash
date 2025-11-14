@@ -136,15 +136,15 @@ const BrowserPane: React.FC<{
           }
         }
         if (data.type === 'url' && data.url) {
-          console.log('[BrowserPane] Received URL event:', data);
+          console.log('[BrowserPane] ✅✅✅ URL EVENT RECEIVED:', data.url, 'for workspace:', workspaceId);
           setFailed(false);
           const appPort = Number(window.location.port || 0);
           if (isAppPort(String(data.url), appPort)) {
-            console.log('[BrowserPane] URL port clashes with app port, ignoring');
+            console.log('[BrowserPane] ⚠️ URL port clashes with app port, ignoring');
             return;
           }
           // Mark busy and navigate; a readiness probe below will clear busy when reachable
-          console.log('[BrowserPane] Navigating to URL:', data.url);
+          console.log('[BrowserPane] 🚀🚀🚀 Navigating to URL:', data.url);
           showSpinner();
           navigate(String(data.url));
           try {
@@ -157,7 +157,9 @@ const BrowserPane: React.FC<{
           } catch {}
           hideSpinner();
         }
-      } catch {}
+      } catch (err) {
+        console.error('[BrowserPane] Error handling hostPreviewEvent:', err);
+      }
     });
     return () => {
       try {
@@ -310,14 +312,16 @@ const BrowserPane: React.FC<{
       
       // Only show browser view if bounds are valid (width and height > 0)
       if (bounds && bounds.width > 0 && bounds.height > 0) {
+        console.log('[BrowserPane] 🎯 Showing browser view with bounds:', bounds, 'url:', url);
         try {
           (window as any).electronAPI?.browserShow?.(bounds, url || undefined);
           // Also ensure URL is loaded if browser view already exists
           if (url) {
+            console.log('[BrowserPane] 🔄 Loading URL:', url);
             (window as any).electronAPI?.browserLoadURL?.(url);
           }
         } catch (err) {
-          console.error('[BrowserPane] Failed to show browser view:', err);
+          console.error('[BrowserPane] ❌ Failed to show browser view:', err);
         }
       } else {
         // If bounds aren't ready yet, retry multiple times with increasing delays
