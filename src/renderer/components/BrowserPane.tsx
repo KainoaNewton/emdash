@@ -152,10 +152,12 @@ const BrowserPane: React.FC<{
           } catch {}
         }
         if (data.type === 'exit') {
+          console.log('[BrowserPane] ⚠️ Exit event received for workspace:', workspaceId);
           try {
             setRunning(String(workspaceId), false);
           } catch {}
           hideSpinner();
+          // Don't clear URL on exit - user might want to see the last URL
         }
       } catch (err) {
         console.error('[BrowserPane] Error handling hostPreviewEvent:', err);
@@ -528,14 +530,17 @@ const BrowserPane: React.FC<{
             />
           </form>
           {!url ? (
-            <div className="hidden items-center gap-1.5 sm:flex">
+            <div className="flex items-center gap-1.5">
               {['http://localhost:5173', 'http://localhost:3000', 'http://localhost:8080'].map(
                 (u) => (
                   <button
                     key={u}
                     type="button"
                     className="inline-flex items-center rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted"
-                    onClick={() => navigate(u)}
+                    onClick={() => {
+                      console.log('[BrowserPane] Quick port button clicked:', u);
+                      navigate(u);
+                    }}
                   >
                     {u.replace('http://', '')}
                   </button>

@@ -24,12 +24,22 @@ function detectPackageManager(dir: string): 'pnpm' | 'yarn' | 'npm' {
 
 function normalizeUrl(u: string): string {
   try {
-    const re = /(https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]):\d{2,5}(?:\/\S*)?)/i;
-    const m = u.match(re);
-    if (!m) return '';
-    const url = new URL(m[1].replace('0.0.0.0', 'localhost'));
-    url.hostname = 'localhost';
-    return url.toString();
+    // More flexible regex to catch various URL formats
+    const patterns = [
+      /(https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]):\d{2,5}(?:\/\S*)?)/i,
+      /(?:Local|server|dev server|running|listening).*?(https?:\/\/[^\s]+)/i,
+      /(?:http:\/\/|https:\/\/)(?:localhost|127\.0\.0\.1|0\.0\.0\.0):\d{2,5}/i,
+    ];
+    for (const re of patterns) {
+      const m = u.match(re);
+      if (m) {
+        const rawUrl = m[1] || m[0];
+        const url = new URL(rawUrl.replace('0.0.0.0', 'localhost').replace('[::1]', 'localhost'));
+        url.hostname = 'localhost';
+        return url.toString();
+      }
+    }
+    return '';
   } catch {
     return '';
   }
@@ -153,8 +163,10 @@ class HostPreviewService extends EventEmitter {
       this.procs.set(workspaceId, child);
       const onData = (buf: Buffer) => {
         const line = buf.toString();
+        log.info?.('[hostPreview] stdout/stderr', { workspaceId, line: line.substring(0, 200) });
         const url = normalizeUrl(line);
         if (url) {
+          log.info?.('[hostPreview] ✅ Detected URL:', { workspaceId, url });
           const evt: HostPreviewEvent = { type: 'url', workspaceId, url };
           this.emit('event', evt);
         }
