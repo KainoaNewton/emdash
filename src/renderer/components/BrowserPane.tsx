@@ -188,15 +188,23 @@ const BrowserPane: React.FC<{
       while (!cancelled && Date.now() < deadline && attempts < maxAttempts) {
         attempts++;
         ok = await tryOnce();
-        if (ok) break;
+        if (ok) {
+          // Success - hide spinner immediately
+          if (!cancelled) {
+            hideSpinner();
+            setFailed(false);
+          }
+          break;
+        }
         // Don't wait on last attempt
         if (!cancelled && Date.now() < deadline && attempts < maxAttempts) {
           await new Promise((r) => setTimeout(r, 500));
         }
       }
-      if (!cancelled) {
+      // If we exhausted all attempts without success, hide spinner and mark as failed
+      if (!cancelled && !ok) {
         hideSpinner();
-        setFailed(!ok);
+        setFailed(true);
       }
     })();
     return () => {
@@ -247,6 +255,7 @@ const BrowserPane: React.FC<{
 
   // Switch to main-managed Browser (WebContentsView): report bounds + drive navigation via preload.
   const containerRef = React.useRef<HTMLDivElement | null>(null);
+  const timeoutRefsRef = React.useRef<NodeJS.Timeout[]>([]);
   const computeBounds = React.useCallback(() => {
     const el = containerRef.current;
     if (!el) return null;
@@ -280,6 +289,10 @@ const BrowserPane: React.FC<{
       return;
     }
     const bounds = computeBounds();
+    // Clear any existing timeouts from previous effect runs
+    timeoutRefsRef.current.forEach(id => clearTimeout(id));
+    timeoutRefsRef.current = [];
+    
     // Only show browser view if bounds are valid (width and height > 0)
     if (bounds && bounds.width > 0 && bounds.height > 0) {
       try {
@@ -290,8 +303,11 @@ const BrowserPane: React.FC<{
         }
       } catch {}
     } else {
-      // If bounds aren't ready yet, retry after a short delay
-      const timeoutId = setTimeout(() => {
+      // If bounds aren't ready yet, retry multiple times with increasing delays
+      let retryCount = 0;
+      const maxRetries = 10;
+      const retry = () => {
+        retryCount++;
         const retryBounds = computeBounds();
         if (retryBounds && retryBounds.width > 0 && retryBounds.height > 0) {
           try {
@@ -300,22 +316,34 @@ const BrowserPane: React.FC<{
               (window as any).electronAPI?.browserLoadURL?.(url);
             }
           } catch {}
+        } else if (retryCount < maxRetries) {
+          // Retry with exponential backoff: 50ms, 100ms, 200ms, etc., capped at 500ms
+          const delay = Math.min(50 * Math.pow(2, retryCount - 1), 500);
+          const id = setTimeout(retry, delay);
+          timeoutRefsRef.current.push(id);
         }
-      }, 100);
-      return () => clearTimeout(timeoutId);
+      };
+      const id = setTimeout(retry, 50);
+      timeoutRefsRef.current.push(id);
     }
+    
     const onResize = () => {
       const b = computeBounds();
-      if (b)
+      if (b && b.width > 0 && b.height > 0) {
         try {
           (window as any).electronAPI?.browserSetBounds?.(b);
         } catch {}
+      }
     };
     window.addEventListener('resize', onResize);
     const RO = (window as any).ResizeObserver;
     const ro = RO ? new RO(() => onResize()) : null;
     if (ro && containerRef.current) ro.observe(containerRef.current);
+    
     return () => {
+      // Clear all pending timeouts
+      timeoutRefsRef.current.forEach(id => clearTimeout(id));
+      timeoutRefsRef.current = [];
       try {
         (window as any).electronAPI?.browserHide?.();
       } catch {}
