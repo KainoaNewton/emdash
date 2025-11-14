@@ -134,19 +134,22 @@ const BrowserToggleButton: React.FC<Props> = ({
             parentProjectPath: (parentProjectPath || '').trim(),
           });
         }
-        // Fallback: if no URL event yet after a short delay, try default dev port once.
+        // Fallback: if no URL event yet after a short delay, try common dev ports in order.
         setTimeout(async () => {
           try {
-            const candidate = 'http://localhost:5173';
-            // Avoid the app's own port
-            if (isAppPort(candidate, appPort)) return;
-            if (await isReachable(candidate)) {
-              browser.open(candidate);
-              try {
-                setLastUrl(id, candidate);
-                setRunning(id, true);
-              } catch {}
-              browser.hideSpinner();
+            const candidates = [5173, 3000, 8080, 8000, 4200]
+              .map((p) => `http://localhost:${p}`)
+              .filter((u) => !isAppPort(u, appPort));
+            for (const candidate of candidates) {
+              if (await isReachable(candidate)) {
+                browser.open(candidate);
+                try {
+                  setLastUrl(id, candidate);
+                  setRunning(id, true);
+                } catch {}
+                browser.hideSpinner();
+                break;
+              }
             }
           } catch {}
         }, FALLBACK_DELAY_MS);
