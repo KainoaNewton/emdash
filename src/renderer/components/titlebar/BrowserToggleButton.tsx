@@ -89,8 +89,10 @@ const BrowserToggleButton: React.FC<Props> = ({
     const wp = (workspacePath || '').trim();
     const appPort = Number(window.location.port || 0);
     // Open pane immediately with no URL; we will navigate when ready
+    console.log('[BrowserToggleButton] Clicked - opening pane', { id, wp, currentIsOpen: browser.isOpen });
     browser.showSpinner();
     browser.toggle(undefined);
+    console.log('[BrowserToggleButton] After toggle', { isOpen: browser.isOpen });
 
     if (id) {
       try {

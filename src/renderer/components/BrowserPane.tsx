@@ -424,18 +424,24 @@ const BrowserPane: React.FC<{
 
   // Debug: log when pane state changes
   React.useEffect(() => {
+    console.log('[BrowserPane] State changed', { 
+      isOpen, 
+      url, 
+      busy, 
+      overlayActive,
+      overlayRaised,
+      widthPct,
+      containerRef: containerRef.current ? 'exists' : 'missing',
+    });
     if (isOpen) {
       const bounds = computeBounds();
-      console.log('[BrowserPane] Pane opened', { 
-        url, 
-        busy, 
-        isOpen, 
-        bounds,
-        containerRef: containerRef.current ? 'exists' : 'missing',
-        containerRect: containerRef.current?.getBoundingClientRect()
-      });
+      console.log('[BrowserPane] Pane opened - bounds:', bounds);
+      if (containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        console.log('[BrowserPane] Container rect:', rect);
+      }
     }
-  }, [isOpen, url, busy, computeBounds]);
+  }, [isOpen, url, busy, overlayActive, overlayRaised, widthPct, computeBounds]);
 
   return (
     <div
@@ -457,7 +463,9 @@ const BrowserPane: React.FC<{
           display: 'grid',
           gridTemplateRows: '36px 1fr',
           zIndex: 10,
+          visibility: isOpen ? 'visible' : 'hidden',
         }}
+        data-testid="browser-pane-container"
       >
         <div className="flex items-center gap-1 border-b border-border bg-gray-50 px-2 dark:bg-gray-900">
           <button
@@ -552,12 +560,17 @@ const BrowserPane: React.FC<{
           </div>
         )}
 
-        <div className="relative min-h-0">
+        <div className="relative min-h-0" data-testid="browser-pane-content">
           <div
             id="emdash-browser-drag"
             className="absolute left-0 top-0 z-[200] h-full w-[6px] cursor-col-resize hover:bg-border/60"
           />
-          <div ref={containerRef} className="h-full w-full min-h-[200px]" />
+          <div 
+            ref={containerRef} 
+            className="h-full w-full min-h-[200px]" 
+            data-testid="browser-view-container"
+            style={{ backgroundColor: 'rgba(0, 0, 0, 0.02)' }}
+          />
           {dragging ? (
             <div
               className="absolute inset-0 z-[180] cursor-col-resize"
