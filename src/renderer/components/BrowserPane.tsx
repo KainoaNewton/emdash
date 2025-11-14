@@ -156,7 +156,12 @@ const BrowserPane: React.FC<{
   React.useEffect(() => {
     let cancelled = false;
     const u = (url || '').trim();
-    if (!u) return;
+    if (!u) {
+      // No URL: clear spinner and failed state
+      hideSpinner();
+      setFailed(false);
+      return;
+    }
     // Kick a lightweight readiness probe to avoid white screen with no feedback
     (async () => {
       const deadline = Date.now() + SPINNER_MAX_MS; // cap spinner
@@ -164,7 +169,11 @@ const BrowserPane: React.FC<{
         try {
           const c = new AbortController();
           const t = setTimeout(() => c.abort(), PROBE_TIMEOUT_MS);
-          await fetch(u, { mode: 'no-cors', signal: c.signal });
+          await fetch(u, { 
+            mode: 'no-cors', 
+            signal: c.signal,
+            cache: 'no-store'
+          });
           clearTimeout(t);
           return true;
         } catch {
@@ -174,10 +183,16 @@ const BrowserPane: React.FC<{
       // If already busy=false (e.g., manual set), don’t force it back on
       showSpinner();
       let ok = false;
-      while (!cancelled && Date.now() < deadline) {
+      let attempts = 0;
+      const maxAttempts = Math.ceil(SPINNER_MAX_MS / 500);
+      while (!cancelled && Date.now() < deadline && attempts < maxAttempts) {
+        attempts++;
         ok = await tryOnce();
         if (ok) break;
-        await new Promise((r) => setTimeout(r, 500));
+        // Don't wait on last attempt
+        if (!cancelled && Date.now() < deadline && attempts < maxAttempts) {
+          await new Promise((r) => setTimeout(r, 500));
+        }
       }
       if (!cancelled) {
         hideSpinner();
@@ -265,10 +280,29 @@ const BrowserPane: React.FC<{
       return;
     }
     const bounds = computeBounds();
-    if (bounds) {
+    // Only show browser view if bounds are valid (width and height > 0)
+    if (bounds && bounds.width > 0 && bounds.height > 0) {
       try {
         (window as any).electronAPI?.browserShow?.(bounds, url || undefined);
+        // Also ensure URL is loaded if browser view already exists
+        if (url) {
+          (window as any).electronAPI?.browserLoadURL?.(url);
+        }
       } catch {}
+    } else {
+      // If bounds aren't ready yet, retry after a short delay
+      const timeoutId = setTimeout(() => {
+        const retryBounds = computeBounds();
+        if (retryBounds && retryBounds.width > 0 && retryBounds.height > 0) {
+          try {
+            (window as any).electronAPI?.browserShow?.(retryBounds, url || undefined);
+            if (url) {
+              (window as any).electronAPI?.browserLoadURL?.(url);
+            }
+          } catch {}
+        }
+      }, 100);
+      return () => clearTimeout(timeoutId);
     }
     const onResize = () => {
       const b = computeBounds();
@@ -479,14 +513,14 @@ const BrowserPane: React.FC<{
               style={{ background: 'transparent' }}
             />
           ) : null}
-          {busy || !url ? (
+          {busy ? (
             <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
               <div className="flex items-center gap-3 rounded-xl border border-border/70 bg-background/95 px-4 py-3 text-sm text-muted-foreground shadow-sm backdrop-blur-[1px]">
                 <Spinner size="md" />
                 <div className="leading-tight">
                   <div className="font-medium text-foreground">Loading preview…</div>
                   <div className="text-xs text-muted-foreground/80">
-                    Starting or connecting to your dev server
+                    {url ? 'Connecting to your dev server' : 'Starting or connecting to your dev server'}
                   </div>
                 </div>
               </div>
