@@ -312,13 +312,15 @@ const BrowserPane: React.FC<{
       
       // Only show browser view if bounds are valid (width and height > 0)
       if (bounds && bounds.width > 0 && bounds.height > 0) {
-        console.log('[BrowserPane] 🎯 Showing browser view with bounds:', bounds, 'url:', url);
+        console.log('[BrowserPane] 🎯 Calling browserShow with bounds:', JSON.stringify(bounds), 'url:', url);
         try {
-          (window as any).electronAPI?.browserShow?.(bounds, url || undefined);
+          const showResult = (window as any).electronAPI?.browserShow?.(bounds, url || undefined);
+          console.log('[BrowserPane] browserShow returned:', showResult);
           // Also ensure URL is loaded if browser view already exists
           if (url) {
-            console.log('[BrowserPane] 🔄 Loading URL:', url);
-            (window as any).electronAPI?.browserLoadURL?.(url);
+            console.log('[BrowserPane] 🔄 Calling browserLoadURL:', url);
+            const loadResult = (window as any).electronAPI?.browserLoadURL?.(url);
+            console.log('[BrowserPane] browserLoadURL returned:', loadResult);
           }
         } catch (err) {
           console.error('[BrowserPane] ❌ Failed to show browser view:', err);

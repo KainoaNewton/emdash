@@ -7,8 +7,12 @@ class BrowserViewService {
 
   ensureView(win?: BrowserWindow): WebContentsView | null {
     const w = win || getMainWindow() || undefined;
-    if (!w) return null;
+    if (!w) {
+      console.error('[BrowserViewService] ensureView: No window');
+      return null;
+    }
     if (!this.view) {
+      console.log('[BrowserViewService] Creating new WebContentsView');
       this.view = new WebContentsView({
         webPreferences: {
           contextIsolation: true,
@@ -16,27 +20,42 @@ class BrowserViewService {
         },
       });
       w.contentView.addChildView(this.view);
+      console.log('[BrowserViewService] WebContentsView added to contentView');
       try {
         this.view.webContents.setWindowOpenHandler?.(() => ({ action: 'deny' }) as any);
       } catch {}
       this.visible = true;
+    } else {
+      console.log('[BrowserViewService] Reusing existing WebContentsView');
     }
     return this.view;
   }
 
   show(bounds: Electron.Rectangle, url?: string) {
+    console.log('[BrowserViewService] show() called', { bounds, url, hasView: !!this.view });
     const win = getMainWindow() || undefined;
+    if (!win) {
+      console.error('[BrowserViewService] No main window available');
+      return;
+    }
     const v = this.ensureView(win);
-    if (!v) return;
+    if (!v) {
+      console.error('[BrowserViewService] Failed to ensure view');
+      return;
+    }
+    console.log('[BrowserViewService] Setting bounds:', bounds);
     v.setBounds(bounds);
     try {
       // Keep rendering even when not focused/visible previously
       v.webContents.setBackgroundThrottling?.(false as any);
     } catch {}
     if (url) {
+      console.log('[BrowserViewService] Loading URL:', url);
       try {
         v.webContents.loadURL(url);
-      } catch {}
+      } catch (err) {
+        console.error('[BrowserViewService] Failed to loadURL:', err);
+      }
     }
     try {
       v.webContents.focus();
@@ -45,11 +64,13 @@ class BrowserViewService {
     try {
       setTimeout(() => {
         try {
+          console.log('[BrowserViewService] Re-applying bounds after delay');
           v.setBounds(bounds);
         } catch {}
       }, 16);
     } catch {}
     this.visible = true;
+    console.log('[BrowserViewService] View shown, visible:', this.visible);
   }
 
   hide() {
